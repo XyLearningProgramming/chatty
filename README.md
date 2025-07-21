@@ -1,2 +1,3 @@
-# chat_with_me
-Chatbot impersonates me professionally with personalized context
+# Chat With Me
+
+Chatbot impersonates me (or you) professionally with context.
