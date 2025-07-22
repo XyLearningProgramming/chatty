@@ -39,16 +39,15 @@ The primary goal is to create a chatbot that can accurately and professionally r
 
 5.  **Configuration Management:** Key parameters—such as the __system prompt__, __persona details__, and __service endpoints__—will be managed in external configuration files to allow for easy modification without code changes.
 
-### 3.3. Quality and Evaluation
+6.  **Golden Dataset:** A "golden dataset" containing a representative set of questions and their ideal answers for critial steps in pipeline will be created.
 
-1.  **Golden Dataset:** A "golden dataset" containing a representative set of questions and their ideal answers for critial steps in pipeline will be created.
-2.  **Regression Testing:** This dataset will be used as a baseline for quality assurance. Automated tests will run against the dataset to evaluate the impact of changes to the prompt, model, or retrieval logic, preventing regressions and objectively measuring performance.
+7.  **Regression Testing:** This dataset will be used as a baseline for quality assurance. Automated tests will run against the dataset to evaluate the impact of changes to the prompt, model, or retrieval logic, preventing regressions and objectively measuring performance.
 
 ### 3.4. Resources and Constraints
 
 *   **Chatbot Service:**
-    *   **CPU:** ~1 core
-    *   **Memory:** ~800 MiB
+    *   **CPU:** ~0.5 core
+    *   **Memory:** ~400 MiB
 *   **Model Server (Qwen3 0.6B):**
     *   **Endpoint:** `/api/v1/chat/completions`
     *   **CPU:** ~3 cores
@@ -57,6 +56,9 @@ The primary goal is to create a chatbot that can accurately and professionally r
 *   **Vector Database (e.g., pgvector):**
     *   **CPU:** ~0.5 core (shared)
     *   **Memory:** ~500 MiB
+*   **Redis:**
+    *   **CPU:** ~0.25 core (shared)
+    *   **Memory:** ~200 MiB
 *   **Backend Infrastructure:**
     *   Access to provisioned Redis and PostgreSQL instances.
 
