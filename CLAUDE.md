@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Chatty is a persona-driven chatbot that impersonates professional personas using a Retrieval-Augmented Generation (RAG) pipeline. The system is designed as a stateless, scalable service that responds to queries based on predefined knowledge bases while maintaining conversation context.
+Chatty is a persona-driven chatbot that impersonates professional personas using a multi agent pipeline. The system is designed as a stateless, scalable service that responds to queries based on predefined knowledge bases while maintaining conversation context.
 
 ## Commands
 
@@ -67,8 +67,18 @@ Business logic includes:
 
 ### Configuration
 External YAML configuration files for:
-- `author.yaml`: System prompt, persona details, knowledge source URIs
+- `author.yaml`: System prompt, persona details, knowledge source URIs, all as tools
 - `config.yaml`: Service endpoints, database connections
+Use `pydantic_settings` to read config.
+Use fastapi dependency to inject settings, service objects. Example of dependency injection:
+```python
+def get_settings() -> Settings:
+    pass
+
+async def handler(settings: Annotated[Settings,Depends(get_settings)]):
+    pass
+```
+
 
 ### Testing Strategy
 - **Golden Dataset**: Curated Q&A pairs for regression testing
@@ -86,7 +96,7 @@ External YAML configuration files for:
 ### Resource Constraints
 The system is designed for minimal resource usage:
 - Chatbot service: ~0.5 core, ~400 MiB
-- Model server: ~3 cores, ~800 MiB  
+- Model server: ~3 cores, ~800 MiB (existing)
 - Vector DB: ~0.5 core, ~500 MiB (shared)
 - Redis: ~0.25 core, ~200 MiB (shared)
 

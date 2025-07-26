@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [tool.ruff.lint]
-select = ["C", "E", "F", "W"]
+select = ["C", "E", "F", "I", "W"]
 
 [tool.ruff]
 line-length = 88
