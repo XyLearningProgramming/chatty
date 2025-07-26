@@ -1,7 +1,38 @@
 [project]
-name = "chat-with-me"
+name = "chatty"
 version = "0.1.0"
-description = "Add your description here"
+description = "Chatbot impersonates me (or you) professionally with context."
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "fastapi>=0.116.1",
+    "pydantic-settings>=2.10.1",
+]
+
+[tool.ruff.lint]
+select = ["C", "E", "F", "W"]
+
+[tool.ruff]
+line-length = 88
+extend-exclude = ["tests"]
+
+[tool.coverage.run]
+source = ["src/chatty"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.5",
+]

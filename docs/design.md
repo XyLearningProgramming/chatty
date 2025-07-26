@@ -55,122 +55,103 @@ The system will consist of the following key components:
 
 ## 3. System Design & Implementation
 
-### 3.1. Unified RAG Pipeline
+### 3.1. Multi-Agent Retrieval and Answering Pipeline
 
-The entire query-answering process is designed as a single, unified pipeline built with LangChain. This pipeline intelligently routes a user's query through a series of conditional steps—starting with a semantic cache check, followed by a relevance estimation, and finally, the full knowledge retrieval and generation process. This approach ensures maximum efficiency and response quality.
+To provide a more dynamic and intelligent response, the system will use a three-agent pipeline. This pipeline separates the concerns of understanding the query's relevance, gathering information, and formulating a final answer.
 
-**Conceptual Flow within the LangChain Pipeline:**
+**Pipeline Flow:**
 
-1.  **Semantic Cache Branch:** The pipeline first attempts to find a semantically similar question in the cache, as described in the **Semantic Caching Strategy** (Section 3.2). If a high-confidence match is found, it immediately returns the cached answer, ending the process.
-2.  **Relevance Check Branch:** If the cache lookup fails, the pipeline routes the query to a relevance-checking sub-chain. If the query is deemed irrelevant, a polite, predefined refusal is returned, and the process stops.
-3.  **Full RAG Branch (Default):** If the query passes the relevance check, it is sent to the main RAG sub-chain, which retrieves context from the knowledge base, truncate conversation history if needed, and generates a final answer.
-4.  **Cache Update:** The newly generated answer is then automatically added to the dynamic tier of the semantic cache for future use.
+1.  **Relevancy Check Agent:**
+    -   The user's query is first processed by this agent to determine if it is relevant to the chatbot's designated professional persona and knowledge base.
+    -   If the query is deemed irrelevant, a predefined polite refusal is returned, and the process stops.
 
-**Pseudo-code Illustrating the Unified Pipeline with LangChain:**
+2.  **Retriever Agent (ReAct):**
+    -   If the query is relevant, it is passed to a **Retriever Agent** built using a ReAct (Reasoning and Acting) framework.
+    -   This agent has access to a set of tools, such as vector store search, web search, or document loaders.
+    -   Based on the query, the agent autonomously decides which tools to use and in what sequence to gather the most relevant context. For example, a query about a recent event might trigger a web search, while a query about professional experience would trigger a search of a resume vector store.
+    -   The output of this agent is a consolidated block of context.
 
-This example uses the LangChain Expression Language (LCEL) with `RunnableBranch` to demonstrate how these conditional steps are chained together.
+3.  **Answering Agent:**
+    -   The original query and the context retrieved by the Retriever Agent are then passed to an **Answering Agent**.
+    -   This agent's responsibility is to synthesize the provided information into a coherent, well-written, and helpful final answer for the user.
+
+**Pseudo-code for the Agent Pipeline:**
 
 ```python
-# Pseudo-code for the unified pipeline
+# Pseudo-code for the multi-agent pipeline
 
-from langchain_core.runnables import RunnableBranch, RunnableLambda
+from langchain.agents import AgentExecutor, create_react_agent
+# Assume other necessary components are defined (e.g., llm, tools, prompts)
 
-# Assume the following components are defined:
-# - semantic_cache_lookup: A runnable that returns a cached answer or None (from Sec 3.2).
-# - relevance_check_chain: A runnable that returns 'relevant' or 'irrelevant'.
-# - full_rag_chain: The main RAG runnable for generation.
-# - update_dynamic_cache: A function to save a new Q&A pair.
-
-# 1. Define the function that will be the final step of the RAG chain
-def rag_and_cache(input_dict):
-    # Run the main RAG chain
-    answer = full_rag_chain.invoke(input_dict)
-    # Update the dynamic cache with the new answer
-    update_dynamic_cache(query=input_dict["query"], answer=answer)
-    return answer
-
-# 2. Create the conditional branches
-unified_pipeline = RunnableBranch(
-    # First, try the semantic cache. The lookup function itself returns the answer if found.
-    (lambda x: semantic_cache_lookup(x["query"]) is not None, 
-     RunnableLambda(lambda x: semantic_cache_lookup(x["query"]))),
-    
-    # Second, check for relevance
-    (lambda x: "irrelevant" in relevance_check_chain.invoke(x), 
-     RunnableLambda(lambda x: "I can only answer questions about my professional experience.")),
-    
-    # Default to the full RAG pipeline and cache the result
-    RunnableLambda(rag_and_cache)
+# 1. Create the Retriever Agent
+retriever_agent = create_react_agent(llm, retriever_tools, retriever_prompt)
+retriever_executor = AgentExecutor(
+    agent=retriever_agent,
+    tools=retriever_tools,
+    verbose=True,
+    max_iterations=8,
+    early_stopping_method="generate",
+    handle_parsing_errors=True
 )
 
-# 3. Invoke the single, unified pipeline
-final_result = unified_pipeline.invoke({"query": user_query})
+# 2. Define the full pipeline
+def run_full_pipeline(user_query: str):
+    # Step 1: Check for relevance
+    if not relevancy_check_chain.invoke({"query": user_query}):
+        return "I can only answer questions about my professional experience."
+
+    # Step 2: Run the retriever agent to get context
+    retrieved_context = retriever_executor.invoke({
+        "input": user_query
+    })
+
+    # Step 3: Run the answering agent with the retrieved context
+    final_answer = answerer_chain.invoke({
+        "query": user_query,
+        "context": retrieved_context["output"]
+    })
+
+    return final_answer
 ```
 
-### 3.2. Outbox Pattern with Priority Queues
+### 3.2. Customizable Tools for the Retriever Agent
 
-To efficiently manage concurrent LLM requests and handle resource constraints, an outbox pattern will be implemented within each process. This component serves as a queue management system that controls access to the limited LLM resources while handling both user-initiated requests and internal pipeline operations.
+The Retriever Agent's capabilities are extended by a set of customizable tools. Each tool is defined by a name, a description, and a JSON schema for its arguments. This allows for a flexible and extensible system where new tools can be easily added or existing ones modified.
 
-**Key Components:**
+**Tool Definition:**
 
-1. **Priority Queue System:**
-   - **High Priority:** User-facing chat requests requiring immediate response
-   - **Low Priority:** Golden dataset generation and background processing (cronjob-style)
+Each tool is defined with the following properties:
+- **Name:** A unique identifier for the tool.
+- **Description:** A description of the tool's functionality, which the ReAct agent uses to decide when to use the tool.
+- **JSON Schema:** A JSON schema defining the arguments that the tool accepts.
 
-2. **Distributed Concurrency Control:**
-   - Uses Redis-based distributed locks to ensure only a configured number of concurrent LLM requests (e.g., 3-5 based on resource limits)
-   - Implements exponential backoff for request retries
-   - Queue position tracking for user feedback
-   - Timeout mechanism for each element in queue
+**Example: Web Search Tool**
 
-3. **Request Processing Flow:**
-   ```python
-   # Pseudo-code for outbox pattern
-   
-   class OutboxManager:
-       def __init__(self, redis_client, max_concurrent=3):
-           self.redis = redis_client
-           self.max_concurrent = max_concurrent
-           self.priority_queue = PriorityQueue()
-       
-       async def enqueue_request(self, request, writer, priority="high"):
-           # Add request to priority queue with metadata
-           queue_item = {
-               "id": generate_uuid(),
-               "request": request,
-               "priority": priority,
-               "timestamp": datetime.utcnow(),
-               "timeout": datetime.utcnow(),
-               "source": request.source,  # "user" or "pipeline"
-               "writer": writer,
-           }
-           await self.priority_queue.put((priority_value, queue_item))
-           
-       async def process_queue(self):
-           while True:
-               # Check available slots using distributed lock
-               if await self.acquire_slot():
-                   try:
-                       # Get highest priority item
-                       _, queue_item = await self.priority_queue.get()
-                       
-                       # Process request
-                       result = await self.execute_llm_request(queue_item)
-                       
-                       # Write back to source
-                       await self.write_back_result(queue_item, result)
-                       
-                   finally:
-                       await self.release_slot()
-   ```
+```json
+{
+  "name": "web_search",
+  "description": "Searches the web for information on a given topic.",
+  "json_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "The search query."
+      }
+    },
+    "required": ["query"]
+  }
+}
+```
 
-4. **Write-Back Mechanism:**
-   - User requests: Stream results directly to WebSocket/SSE connection
-   - Pipeline requests: Store results in vector database
+**Tool Processors and Parsers:**
 
-**Integration with Existing Pipeline:**
+Each tool can have an associated processor and parser.
 
-The outbox pattern integrates seamlessly with the unified RAG pipeline by intercepting LLM calls and routing them through the priority queue system, ensuring fair resource allocation and system stability.
+- **Processor:** A function that takes the tool's arguments and performs the necessary actions. For example, the `web_search` processor would take the search query, perform a web search, and return the search results.
+- **Parser:** A function that takes the output of the processor and formats it into a standardized format that can be used by the agent. This allows for a consistent data structure across different tools.
+
+By using this modular approach, the system can be easily extended with new tools and data sources, making the chatbot more versatile and powerful.
 
 ### 3.3. Semantic Caching Strategy
 
@@ -261,7 +242,8 @@ class TokenProcessor:
                     await self._send_content_tokens(writer)
         elif self.state == TokenState.DETECTING_JSON:
             self.json_buffer += token
-            if "\n" in token:  # Found newline after ```json
+            if "
+" in token:  # Found newline after ```json
                 self.state = TokenState.BUFFERING_JSON
         elif self.state == TokenState.BUFFERING_JSON:
             self.json_buffer += token
@@ -356,51 +338,38 @@ redis_uri: "redis://localhost:6379"
 
 ### 3.8. File & Directory Structure
 
-To ensure a clean separation of concerns while maintaining simplicity, the project will adopt a pragmatic structure inspired by Domain-Driven Design (DDD). The core logic of the application will be orchestrated within a central `ChatService`, which assembles and executes the RAG pipeline using components from the infrastructure layer.
-
-This structure clearly separates the web-facing API, the core application logic, and the external infrastructure integrations, making the system easy to navigate and maintain.
-
-**Proposed File Structure:**
+To ensure a clean separation of concerns and better scalability, the project will adopt a feature-sliced directory structure.
 
 ```
-alembic/                    # Database migrations
-├── versions/
-└── env.py
-
-src/chat_with_me/
-├── api/
-│   └── v1/
-│       └── chat.py         # FastAPI endpoint. Handles HTTP, SSE streaming, and calls ChatService.
-├── core/
-│   └── config.py           # Loads and provides access to configuration.
-├── domain/
-│   └── models.py           # Core data structures (e.g., API request/response models).
-├── infrastructure/
-│   ├── cache.py            # Implements the semantic cache lookup and update logic.
-│   ├── llm.py              # Client for interacting with the Qwen model server.
-│   └── vector_store.py     # Manages interaction with the pgvector database.
-├── services/
-│   └── chat_service.py     # **Orchestrator.** Assembles and executes the full RAG pipeline.
-└── main.py                 # Application entry point (creates FastAPI app).
-
-configs/
-├── author.yaml             # Persona and prompt configuration.
-└── config.yaml             # Application and infrastructure configuration.
-
-tests/
-├── services/
-│   └── test_chat_service.py
-└── test_api.py
+src/
+└── chatty/
+    ├── __init__.py
+    ├── api/
+    │   ├── __init__.py
+    │   ├── chat.py
+    │   └── models.py
+    ├── core/
+    │   ├── __init__.py
+    │   ├── knowledge.py
+    │   ├── synthesis.py
+    │   ├── memory.py
+    │   └── generation.py
+    ├── infra/
+    │   ├── __init__.py
+    │   └── vector_db.py
+    └── app.py
 ```
 
 **Component Responsibilities:**
 
--   **`main.py`**: Initializes the FastAPI application and includes the API routers.
--   **`api/v1/chat.py`**: The thinnest layer. It's responsible for handling the incoming HTTP request, validating the payload, and streaming the response back to the client using Server-Sent Events (SSE). It calls the `ChatService` to get the response stream.
--   **`services/chat_service.py`**: The heart of the application. It imports the necessary building blocks from `infrastructure` (the LLM client, cache, vector store) and assembles the complete, conditional RAG pipeline (the `RunnableBranch` from the pseudo-code). It exposes a simple method for the API layer to call, hiding the complexity of the pipeline.
--   **`infrastructure/`**: Contains all the code that deals with external systems. Each file provides a clean client or interface (e.g., `llm.py` has a function to invoke the model, `cache.py` has a function to perform a cache lookup).
--   **`domain/models.py`**: Holds simple data structures, primarily for defining the shape of data passed between layers, like the API request body.
--   **`core/config.py`**: Handles loading configuration from the `configs/` directory so that it's available to the rest of the application.
+*   **`app.py`**: Initializes the FastAPI application and includes the feature-level routers from `api`.
+*   **`api/chat.py`**: Defines the FastAPI endpoint for chat, handles HTTP requests and responses, and orchestrates calls to the `core` services.
+*   **`api/models.py`**: Defines the Pydantic models for the chat API.
+*   **`core/knowledge.py`**: Contains the implementation of the Knowledge Agent, including its tools for data retrieval and context gathering.
+*   **`core/synthesis.py`**: Contains the implementation of the Synthesis Agent for combining information into coherent responses.
+*   **`core/memory.py`**: Implements semantic memory business logic including admission policies, similarity thresholds, frequency tracking, and LFU eviction strategies.
+*   **`core/generation.py`**: Handles text generation and token processing state machine for streaming responses.
+*   **`infra/vector_db.py`**: Provides an abstraction layer for interacting with the vector database.
 
 ---
 
