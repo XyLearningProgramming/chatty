@@ -12,10 +12,6 @@ class ThirdPartyConfig(BaseModel):
         default="redis://localhost:6379",
         description="Redis connection URI",
     )
-    model_server_endpoint: str = Field(
-        default="http://localhost:8080/api/v1/",
-        description="Model server endpoint URL",
-    )
 
 
 class APIConfig(BaseModel):
@@ -46,15 +42,34 @@ class CacheConfig(BaseModel):
 class ChatConfig(BaseModel):
     """Configuration for chat settings."""
 
-    max_conversation_length: int = Field(
-        default=3, description="Maximum conversation history length"
+    endpoint: str = Field(
+        default="http://localhost:8080/api/v1/",
+        description="Model server endpoint URL",
     )
-    max_response_tokens: int = Field(
-        default=2048, description="Maximum tokens in a single response"
+    api_key: str | None = Field(
+        default=None, description="API key for the language model service"
+    )
+    model_name: str | None = Field(
+        "gpt-3.5-turbo", description="Name of the language model to use"
+    )
+    max_tokens: int = Field(
+        default=1024, description="Maximum tokens to generate in a response"
     )
     temperature: float = Field(
         default=0.5, description="Sampling temperature for model responses"
     )
     top_p: float = Field(
         default=0.9, description="Top-p sampling parameter for model responses"
+    )
+    timeout: float = Field(
+        default=90.0, description="Timeout for model requests in seconds"
+    )
+    max_retries: int = Field(
+        default=3, description="Maximum number of retries for model requests"
+    )
+
+    # Extra chat settings forced by chatty project itself.
+
+    max_conversation_length: int = Field(
+        default=3, description="Maximum conversation history length"
     )

@@ -94,6 +94,7 @@ async def handler(settings: Annotated[Settings,Depends(get_settings)]):
 - Use type hints consistently
 - Follow existing patterns in the codebase
 - Use python3.13 compatible type formatting, eg. `list | None` instead of `Optional[List]`
+- Use `uv add xxx` to add package; do not change `pyproject.toml` directly; add `--dev` arg if only used in test.
 
 ### Resource Constraints
 The system is designed for minimal resource usage:

@@ -12,4 +12,3 @@
 #   max_response_tokens: 2048
 
 # third_party:
-#   model_server_endpoint: "http://localhost:8000/api"
