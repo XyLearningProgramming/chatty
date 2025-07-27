@@ -8,11 +8,15 @@ from langchain.callbacks.base import BaseCallbackHandler
 from langchain.prompts import PromptTemplate
 from langchain_core.language_models import BaseLanguageModel
 
+from chatty.configs.config import AppConfig, get_app_config
 from chatty.core.llm import get_llm
 from chatty.infra import singleton
 
-from .prompt import REACT_PROMPT
+from .prompt import REACT_PROMPT_ONE_STEP
 from .tools.registry import ToolRegistry, get_tool_registry
+
+PERSONA_CHARACTER_DEFAULT = "professional"
+PERSONA_EXPERTISE_DEFAULT = "web development"
 
 
 class StreamingCallbackHandler(BaseCallbackHandler):
@@ -38,19 +42,44 @@ class StreamingCallbackHandler(BaseCallbackHandler):
 class ChatService:
     """Async chat service powered by ReAct agent with streaming support."""
 
-    def __init__(self, llm: BaseLanguageModel, tools_registry: ToolRegistry):
+    def __init__(
+        self, llm: BaseLanguageModel, tools_registry: ToolRegistry, config: AppConfig
+    ):
         """Initialize chat service with configuration."""
+        # Format the prompt with persona information
+        persona = config.persona
+        persona_character = (
+            ", ".join(persona.character)
+            if persona.character
+            else PERSONA_CHARACTER_DEFAULT
+        )
+        persona_expertise = (
+            ", ".join(persona.expertise)
+            if persona.expertise
+            else PERSONA_EXPERTISE_DEFAULT
+        )
+
+        formatted_prompt = REACT_PROMPT_ONE_STEP.format(
+            persona_name=persona.name,
+            persona_character=persona_character,
+            persona_expertise=persona_expertise,
+            tools="{tools}",
+            tool_names="{tool_names}",
+            input="{input}",
+            agent_scratchpad="{agent_scratchpad}",
+        )
+
         # Create ReAct agent
         self.get_agent_executor = lambda: AgentExecutor(
             agent=create_react_agent(
                 llm=llm,
                 tools=tools_registry.get_tools(),
-                prompt=PromptTemplate.from_template(REACT_PROMPT),
+                prompt=PromptTemplate.from_template(formatted_prompt),
             ),
             tools=tools_registry.get_tools(),
             verbose=True,
             max_iterations=8,
-            early_stopping_method="generate",
+            early_stopping_method="force",
             handle_parsing_errors=True,
         )
 
@@ -112,6 +141,7 @@ class ChatService:
 def get_chat_service(
     llm: Annotated[BaseLanguageModel, Depends(get_llm)],
     tools_registry: Annotated[ToolRegistry, Depends(get_tool_registry)],
+    config: Annotated[AppConfig, Depends(get_app_config)],
 ) -> ChatService:
     """Factory function to create a configured chat service."""
-    return ChatService(llm, tools_registry)
+    return ChatService(llm, tools_registry, config)

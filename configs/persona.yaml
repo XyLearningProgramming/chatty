@@ -28,4 +28,4 @@ persona:
         url: https://x3huang.dev
       processors: 
         - html_head_title_meta
-      arg_schema: {}
+      arg_schema: null

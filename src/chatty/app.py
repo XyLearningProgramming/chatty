@@ -48,6 +48,8 @@ def get_app() -> FastAPI:
     # Include routers
     app.include_router(chat_router)
 
+    app.get("/health")(lambda: "ok")
+
     return app
 
 

@@ -43,17 +43,17 @@ class ChatConfig(BaseModel):
     """Configuration for chat settings."""
 
     endpoint: str = Field(
-        default="http://localhost:8080/api/v1/",
+        default="http://localhost:8000/api/v1/",
         description="Model server endpoint URL",
     )
-    api_key: str | None = Field(
-        default=None, description="API key for the language model service"
+    api_key: str = Field(
+        default="", description="API key for the language model service"
     )
     model_name: str | None = Field(
         "gpt-3.5-turbo", description="Name of the language model to use"
     )
     max_tokens: int = Field(
-        default=1024, description="Maximum tokens to generate in a response"
+        default=4096, description="Maximum tokens to generate in a response"
     )
     temperature: float = Field(
         default=0.5, description="Sampling temperature for model responses"
@@ -62,7 +62,7 @@ class ChatConfig(BaseModel):
         default=0.9, description="Top-p sampling parameter for model responses"
     )
     timeout: float = Field(
-        default=90.0, description="Timeout for model requests in seconds"
+        default=300.0, description="Timeout for model requests in seconds"
     )
     max_retries: int = Field(
         default=3, description="Maximum number of retries for model requests"

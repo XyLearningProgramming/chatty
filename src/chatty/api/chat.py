@@ -5,19 +5,11 @@ from typing import Annotated, AsyncGenerator
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from chatty.configs import AppConfig, get_app_config
-from chatty.core.chat_service import ChatService
-from chatty.core.tools import ToolsRegistry
+from chatty.core.chat_service import ChatService, get_chat_service
 
 from .models import ChatRequest, EndOfStreamEvent, ErrorEvent, TokenEvent
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
-
-
-def get_chat_service(app_config: Annotated[AppConfig, Depends(get_app_config)]) -> ChatService:
-    """Get configured chat service with tools registry."""
-    tools_registry = ToolsRegistry(app_config.persona.tools)
-    return ChatService(app_config.chat, tools_registry)
 
 
 async def stream_chat_response(

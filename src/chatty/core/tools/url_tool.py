@@ -7,7 +7,7 @@ from langchain.tools import BaseTool
 
 from chatty.configs import PersonaToolConfig
 
-from .base import ToolBuilder
+from .model import ToolBuilder
 
 
 class FixedURLTool(BaseTool):
@@ -17,10 +17,6 @@ class FixedURLTool(BaseTool):
     url: str | None = None
     timeout: int = 30
     max_content_length: int = 1000
-
-    @property
-    def tool_type(self) -> str:
-        return "url"
 
     def _run(
         self,
@@ -66,3 +62,7 @@ class FixedURLTool(BaseTool):
             # timeout=config.timeout,
             # max_content_length=config.max_content_length,
         )
+
+
+# Add class attribute after class definition to avoid Pydantic interference
+FixedURLTool.tool_type = "url"

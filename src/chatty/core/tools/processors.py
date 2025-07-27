@@ -9,6 +9,10 @@ from bs4 import BeautifulSoup
 class Processor(Protocol):
     """Abstract base class for content processors."""
 
+    @property
+    def processor_name() -> str:
+        return ""
+
     @abstractmethod
     def process(self, content: str) -> str:
         """Process the given content and return the modified content."""
@@ -66,6 +70,8 @@ def with_processors(*processors: Processor):
 
 class HtmlHeadTitleMeta(Processor):
     """Processor for extracting title and meta information from HTML head section."""
+
+    processor_name = "html_head_title_meta"
 
     # Predetermined meta attributes to extract
     meta_attrs = {
