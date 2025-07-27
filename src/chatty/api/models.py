@@ -1,8 +1,11 @@
 """Pydantic models for the chat API."""
 
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+# Maximum length for chat query input, only short queries are allowed
+CHAT_QUERY_MAX_LENGTH = 1024
 
 
 class ChatMessage(BaseModel):
@@ -15,8 +18,10 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     """Request model for the chat endpoint."""
 
-    query: str = Field(description="User query to process")
-    conversation_history: List[ChatMessage] = Field(
+    query: str = Field(
+        description="User query to process", max_length=CHAT_QUERY_MAX_LENGTH
+    )
+    conversation_history: list[ChatMessage] = Field(
         default_factory=list,
         description="Previous conversation messages for context",
     )
@@ -33,7 +38,7 @@ class StructuredDataEvent(BaseModel):
     """Structured data event."""
 
     type: Literal["structured_data"] = "structured_data"
-    data: Dict[str, Any] = Field(description="Structured data payload")
+    data: dict[str, Any] = Field(description="Structured data payload")
 
 
 class EndOfStreamEvent(BaseModel):
@@ -47,17 +52,17 @@ class ErrorEvent(BaseModel):
 
     type: Literal["error"] = "error"
     message: str = Field(description="Error message")
-    code: Optional[str] = Field(default=None, description="Error code")
+    code: str | None = Field(default=None, description="Error code")
 
 
 # Union type for all possible streaming events
-StreamEvent = Union[TokenEvent, StructuredDataEvent, EndOfStreamEvent, ErrorEvent]
+StreamEvent = TokenEvent | StructuredDataEvent | EndOfStreamEvent | ErrorEvent
 
 
 class ChatResponse(BaseModel):
     """Non-streaming response model (fallback)."""
 
     response: str = Field(description="Complete response text")
-    structured_data: Optional[Dict[str, Any]] = Field(
+    structured_data: dict[str, Any] | None = Field(
         default=None, description="Optional structured data"
     )

@@ -1,0 +1,15 @@
+# api:
+
+# cache:
+#   redis_uri: "redis://localhost:6379"
+#   enabled: true
+#   max_size: 1000
+#   similarity_threshold: 0.95
+
+# chat:
+#   max_conversation_length: 3
+#   temperature: 0.3
+#   max_response_tokens: 2048
+
+# third_party:
+#   model_server_endpoint: "http://localhost:8000/api"

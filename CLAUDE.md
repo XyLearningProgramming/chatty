@@ -84,6 +84,7 @@ async def handler(settings: Annotated[Settings,Depends(get_settings)]):
 - **Golden Dataset**: Curated Q&A pairs for regression testing
 - **CI Testing**: Uses lightweight Qwen2-0.5B-Instruct model with caching
 - **Quality Gates**: Semantic similarity and keyword matching against golden answers
+- **Test Standards**: Tests should be simple, but covering most codes, with less strict condition checks; do not extensively check functions from third-party.
 
 ## Development Notes
 
@@ -92,6 +93,7 @@ async def handler(settings: Annotated[Settings,Depends(get_settings)]):
 - Exclude tests from Ruff linting
 - Use type hints consistently
 - Follow existing patterns in the codebase
+- Use python3.13 compatible type formatting, eg. `list | None` instead of `Optional[List]`
 
 ### Resource Constraints
 The system is designed for minimal resource usage:

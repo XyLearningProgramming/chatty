@@ -1,0 +1,16 @@
+{
+    "[python]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.codeActionsOnSave": {
+            "source.fixAll": "explicit",
+            "source.organizeImports": "explicit",
+        }
+    },
+    "python.analysis.autoImportCompletions": true,
+    // "black-formatter.args": ["--line-length", "88"],
+    "ruff.organizeImports": true,
+    // "ruff.lineLength": 88,
+    // "ruff.lint.select": ["C", "E", "F", "W", "I"],
+    "autoDocstring.docstringFormat": "sphinx",
+}
