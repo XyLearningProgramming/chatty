@@ -13,7 +13,7 @@ from pydantic_settings import (
 from chatty.infra import singleton
 
 from .persona import PersonaConfig
-from .system import APIConfig, CacheConfig, ChatConfig, ThirdPartyConfig
+from .system import APIConfig, CacheConfig, ChatConfig, LLMConfig, ThirdPartyConfig
 
 # Define paths relative to this file.
 
@@ -61,9 +61,13 @@ class AppConfig(BaseSettings):
         description="Cache configuration settings",
     )
 
+    llm: LLMConfig = Field(
+        default_factory=LLMConfig,
+        description="LLM client configuration settings",
+    )
+
     chat: ChatConfig = Field(
-        default_factory=ChatConfig,
-        description="Chat configuration settings",
+        default_factory=ChatConfig, description="Configuration for chat agent."
     )
 
     persona: PersonaConfig = Field(

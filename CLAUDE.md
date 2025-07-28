@@ -27,7 +27,7 @@ The system follows a multi-agent architecture with three main agents:
 2. **Knowledge Agent (ReAct)** - Uses tools to gather context from various sources
 3. **Synthesis Agent** - Synthesizes information into coherent responses
 
-### Directory Structure
+<!-- ### Directory Structure
 ```
 src/chatty/
 ├── app.py              # Main FastAPI application entry point
@@ -41,7 +41,7 @@ src/chatty/
 │   └── generation.py   # Text generation and token processing
 └── infra/              # Infrastructure abstractions
     └── vector_db.py    # Vector database operations
-```
+``` -->
 
 ### Key Technologies
 - **Backend**: FastAPI with Python 3.13+

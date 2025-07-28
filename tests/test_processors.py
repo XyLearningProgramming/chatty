@@ -4,10 +4,10 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from chatty.core.tools.processors import HtmlHeadTitleMeta
+from chatty.core.service.tools.processors import HtmlHeadTitleMeta
 
 
-def test_real_site_html_processing(self):
+def test_real_site_html_processing():
     """Test processing real site HTML data."""
     # Load real test data
     test_data_path = Path(__file__).parent / "test_data" / "site.html"

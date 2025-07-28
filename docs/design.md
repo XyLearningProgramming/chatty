@@ -91,7 +91,7 @@ retriever_executor = AgentExecutor(
     verbose=True,
     max_iterations=8,
     early_stopping_method="generate",
-    handle_parsing_errors=True
+    handle_parsing_errors=False
 )
 
 # 2. Define the full pipeline

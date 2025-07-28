@@ -7,9 +7,9 @@ from langchain.tools import BaseTool
 
 from chatty.configs.config import get_app_config
 from chatty.configs.persona import PersonaToolConfig
-from chatty.core.tools.model import ToolBuilder
 from chatty.infra import singleton
 
+from .model import ToolBuilder
 from .processors import HtmlHeadTitleMeta, Processor, with_processors
 from .url_tool import FixedURLTool
 

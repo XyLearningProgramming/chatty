@@ -6,7 +6,7 @@ from unittest.mock import patch
 from chatty.configs.config import AppConfig
 
 
-def test_config_env_vars_work(self):
+def test_config_env_vars_work():
     """Test that environment variables work for configuration."""
 
     env_vars = {

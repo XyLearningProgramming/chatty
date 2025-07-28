@@ -1,50 +1,47 @@
 """Chat API endpoint implementation."""
 
+import asyncio
 from typing import Annotated, AsyncGenerator
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from chatty.core.chat_service import ChatService, get_chat_service
+from chatty.core.service import (
+    ChatService,
+    get_chat_service,
+)
 
-from .models import ChatRequest, EndOfStreamEvent, ErrorEvent, TokenEvent
+from .models import (
+    ChatRequest,
+    convert_service_event_to_api_event,
+    convert_service_exc_to_api_error_event,
+)
+
+STREAMING_RESPONSE_MEDIA_TYPE = "text/plain"
+STREAMING_RESPONSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Headers": "Cache-Control",
+}
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
 
-async def stream_chat_response(
-    request: ChatRequest,
-    chat_service: ChatService,
-) -> AsyncGenerator[str, None]:
-    """Stream chat response as Server-Sent Events."""
+async def stream_chat_response(request, service) -> AsyncGenerator[str, None]:
     try:
-        # Stream response from the chat service
-        async for event in chat_service.stream_response(request.query):
-            if event["type"] == "token":
-                token_event = TokenEvent(content=event["data"]["token"])
-                yield f"data: {token_event.model_dump_json()}\n\n"
-            elif event["type"] == "end_of_stream":
-                end_event = EndOfStreamEvent()
-                yield f"data: {end_event.model_dump_json()}\n\n"
-            elif event["type"] == "error":
-                error_event = ErrorEvent(
-                    message=event["data"]["error"],
-                    code="PROCESSING_ERROR",
-                )
-                yield f"data: {error_event.model_dump_json()}\n\n"
-
+        async for service_event in service.stream_response(request.query):
+            yield convert_service_event_to_api_event(service_event)
+    except asyncio.CancelledError:
+        # The `stream_response` generator itself will see this Cancellation
+        # from yield at its next await, so it can clean up there.
+        raise  # Raise again without wrapping into an error event.
     except Exception as e:
-        # Send error event
-        error_event = ErrorEvent(
-            message=f"An error occurred during processing: {str(e)}",
-            code="PROCESSING_ERROR",
-        )
-        yield f"data: {error_event.model_dump_json()}\n\n"
+        yield convert_service_exc_to_api_error_event(e)
 
 
 @router.post("/chat")
 async def chat(
-    request: ChatRequest,
+    chat_request: ChatRequest,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> StreamingResponse:
     """
@@ -56,13 +53,11 @@ async def chat(
     - structured_data: JSON objects for frontend rendering
     - end_of_stream: Marks the end of the response
     - error: Error information
+
+    Handles client disconnection by cancelling ongoing LLM processing.
     """
     return StreamingResponse(
-        stream_chat_response(request, chat_service),
-        media_type="text/plain",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Headers": "Cache-Control",
-        },
+        stream_chat_response(chat_request, chat_service),
+        media_type=STREAMING_RESPONSE_MEDIA_TYPE,
+        headers=STREAMING_RESPONSE_HEADERS,
     )

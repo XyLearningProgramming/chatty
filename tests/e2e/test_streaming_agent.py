@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 CHAT_TIMEOUT = 600  # 10 minutes timeout for long-running agent tasks
+RESPONSE_PREVIEW_LENGTH = 4096  # allow almost all response
 
 
 class SSEParser:
@@ -290,6 +291,10 @@ class TestStreamingAgent:
 
                     token_events = []
                     error_events = []
+                    structured_events = []
+
+                    print("Streaming response:")
+                    print("-" * 50)
 
                     async for line in response.aiter_lines():
                         if line:
@@ -298,8 +303,24 @@ class TestStreamingAgent:
                                 event_type = event.get("type")
                                 if event_type == "token":
                                     token_events.append(event)
+                                    # Print tokens in real-time
+                                    print(event.get("content", ""), end="", flush=True)
+                                elif event_type == "structured_data":
+                                    structured_events.append(event)
+                                    # Print structured data with formatting
+                                    data_type = event.get("data_type", "unknown")
+                                    print(
+                                        f"\n[{data_type.upper()}]", end="", flush=True
+                                    )
+                                    if data_type == "json_output":
+                                        print(f" JSON: {event.get('data', {})}")
                                 elif event_type == "error":
                                     error_events.append(event)
+                                    print(
+                                        f"\n[ERROR] {event.get('message', 'Unknown error')}"
+                                    )
+
+                    print("\n" + "-" * 50)
 
                     # Should not have error events
                     assert len(error_events) == 0, (
@@ -316,7 +337,9 @@ class TestStreamingAgent:
                         event.get("content", "") for event in token_events
                     ).lower()
 
-                    print(f"Response preview: {full_response[:200]}...")
+                    print(
+                        f"Response preview: {full_response[:RESPONSE_PREVIEW_LENGTH]}..."
+                    )
 
                     if test_case["should_refuse"]:
                         # For questions that should be refused, check for refusal keywords

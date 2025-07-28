@@ -7,8 +7,6 @@ from langchain.tools import BaseTool
 
 from chatty.configs import PersonaToolConfig
 
-from .model import ToolBuilder
-
 
 class FixedURLTool(BaseTool):
     """Tool for fetching website content."""

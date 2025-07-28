@@ -6,7 +6,7 @@ from unittest.mock import patch
 from chatty.configs.config import AppConfig, get_app_config
 
 
-def test_config_works(self):
+def test_config_works():
     """Test that configuration system works with environment variables."""
 
     env_vars = {
@@ -21,7 +21,7 @@ def test_config_works(self):
         assert config.cache.max_size == 500
 
 
-def test_singleton_get_app_config(self):
+def test_singleton_get_app_config():
     """Test that get_app_config() works and returns same instance."""
 
     # Clear any existing singleton instance

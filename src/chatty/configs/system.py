@@ -39,8 +39,8 @@ class CacheConfig(BaseModel):
     ttl_hours: int = Field(default=24, description="TTL for dynamic memory entries")
 
 
-class ChatConfig(BaseModel):
-    """Configuration for chat settings."""
+class LLMConfig(BaseModel):
+    """Configuration for LLM client."""
 
     endpoint: str = Field(
         default="http://localhost:8000/api/v1/",
@@ -68,7 +68,13 @@ class ChatConfig(BaseModel):
         default=3, description="Maximum number of retries for model requests"
     )
 
-    # Extra chat settings forced by chatty project itself.
+
+class ChatConfig(BaseModel):
+    """Configuration for chat agent."""
+
+    agent_name: str = Field(
+        default="one_step", description="Supported agent name to spawn as chat service"
+    )
 
     max_conversation_length: int = Field(
         default=3, description="Maximum conversation history length"

@@ -7,11 +7,11 @@ from langchain_core.language_models import BaseLanguageModel
 from langchain_openai import ChatOpenAI
 
 from chatty.configs.config import get_app_config
-from chatty.configs.system import ChatConfig
+from chatty.configs.system import LLMConfig
 
 
 def get_llm(
-    config: Annotated[ChatConfig, Depends(lambda: get_app_config().chat)],
+    config: Annotated[LLMConfig, Depends(lambda: get_app_config().llm)],
 ) -> BaseLanguageModel:
     """Create and return a ChatOpenAI instance with the provided configuration.
 
