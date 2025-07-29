@@ -17,7 +17,6 @@ from .prompt import (
     PERSONA_EXPERTISE_DEFAULT,
     REACT_PROMPT_ONE_STEP,
 )
-from .stream_processor import StreamProcessor
 from .tools.registry import ToolRegistry
 
 # LangChain constants
@@ -61,6 +60,7 @@ class OneStepChatService(ChatService):
 
         # Create ReAct agent
         self.get_agent_executor = lambda: AgentExecutor(
+            name=self.chat_service_name,
             agent=create_react_agent(
                 llm=llm,
                 tools=tools_registry.get_tools(),
@@ -70,7 +70,7 @@ class OneStepChatService(ChatService):
             verbose=True,
             max_iterations=3,
             early_stopping_method="force",
-            # Limit retries even if agent fails to produce valid output.
+            # Allow fallbacks of parsing error .
             handle_parsing_errors=False,
         )
 
@@ -90,11 +90,37 @@ class OneStepChatService(ChatService):
         """
         # Use StreamProcessor to handle LangChain events
         langchain_events = self.get_agent_executor().astream_events(
-            {"input": question}, version=LANGCHAIN_ASTREAM_VERSION
+            {"input": question},
+            config={"run_name": self.chat_service_name},
+            version=LANGCHAIN_ASTREAM_VERSION,
         )
+        async for event in langchain_events:
+            # Yield unmodified structured data events for now
+            yield event
+            # # 1) Plain LLM tokens
+            # if isinstance(evt, LLMResult) and evt.generations:
+            #     # each generation has .text for the new token(s)
+            #     for gen in evt.generations:
+            #         # you may need to diff against previous to get only the new chunk
+            #         yield ServiceTokenEvent(content=gen.text)
 
-        # Process events through StreamProcessor
-        async for service_event in StreamProcessor().process_langchain_events(
-            langchain_events
-        ):
-            yield service_event
+            # # 2) Function/tool calls
+            # elif isinstance(evt, AgentAction):
+            #     # if the agent is invoking your “emit_structured” tool:
+            #     if evt.tool == "emit_structured":
+            #         # evt.log or evt.tool_input is the JSON string/obj
+            #         # parse it and emit a structured event
+            #         data = evt.tool_input
+            #         if isinstance(data, str):
+            #             # sometimes it’s a JSON‐string
+            #             data = json.loads(data)
+            #         yield ServiceStructuredDataEvent(data=data)
+            #     else:
+            #         # you could also surface other tool results here,
+            #         # or ignore them if you treat them as “internal”
+            #         pass
+
+            # # 3) Final finish
+            # elif isinstance(evt, AgentFinish):
+            #     yield ServiceEndOfStreamEvent()
+            #     return

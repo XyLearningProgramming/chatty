@@ -1,12 +1,13 @@
 """Pydantic models for the chat API."""
 
+import json
 from traceback import format_exc
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
-if TYPE_CHECKING:
-    from chatty.core.service.models import ServiceStreamEvent
+from chatty.core.service.models import ServiceStreamEvent
 
 # Maximum length for chat query input, only short queries are allowed
 CHAT_QUERY_MAX_LENGTH = 1024
@@ -31,24 +32,24 @@ class ChatRequest(BaseModel):
     )
 
 
-class TokenEvent(BaseModel):
-    """Token streaming event."""
+# class TokenEvent(BaseModel):
+#     """Token streaming event."""
 
-    type: Literal["token"] = "token"
-    content: str = Field(description="Token content")
-
-
-class StructuredDataEvent(BaseModel):
-    """Structured data event."""
-
-    type: Literal["structured_data"] = "structured_data"
-    data: dict[str, Any] = Field(description="Structured data payload")
+#     type: Literal["token"] = "token"
+#     content: str = Field(description="Token content")
 
 
-class EndOfStreamEvent(BaseModel):
-    """End of stream marker event."""
+# class StructuredDataEvent(BaseModel):
+#     """Structured data event."""
 
-    type: Literal["end_of_stream"] = "end_of_stream"
+#     type: Literal["structured_data"] = "structured_data"
+#     data: dict[str, Any] = Field(description="Structured data payload")
+
+
+# class EndOfStreamEvent(BaseModel):
+#     """End of stream marker event."""
+
+#     type: Literal["end_of_stream"] = "end_of_stream"
 
 
 class ErrorEvent(BaseModel):
@@ -59,35 +60,50 @@ class ErrorEvent(BaseModel):
     code: str | None = Field(default=None, description="Error code")
 
 
-# Union type for all possible streaming events
-StreamEvent = TokenEvent | StructuredDataEvent | EndOfStreamEvent | ErrorEvent
+# # Union type for all possible streaming events
+# StreamEvent = TokenEvent | StructuredDataEvent | EndOfStreamEvent | ErrorEvent
+
+# NOTE: passing from service layer directly now for simplicity.
+StreamEvent = ServiceStreamEvent
 
 
-def convert_service_event_to_api_event(service_event: "ServiceStreamEvent") -> str:
+def convert_service_event_to_api_event(event: ServiceStreamEvent) -> str:
     """Convert service layer event to API layer SSE format efficiently.
 
     Service and API events now have matching field names, so conversion is direct.
     """
-    from chatty.core.service.models import (
-        ServiceEndOfStreamEvent,
-        ServiceStructuredDataEvent,
-        ServiceTokenEvent,
-    )
+    # from chatty.core.service.models import (
+    #     ServiceEndOfStreamEvent,
+    #     ServiceStructuredDataEvent,
+    #     ServiceTokenEvent,
+    # )
 
-    if isinstance(service_event, ServiceTokenEvent):
-        api_event = TokenEvent(**service_event.model_dump())
-    elif isinstance(service_event, ServiceStructuredDataEvent):
-        api_event = StructuredDataEvent(**service_event.model_dump())
-    elif isinstance(service_event, ServiceEndOfStreamEvent):
-        api_event = EndOfStreamEvent(**service_event.model_dump())
+    # if isinstance(service_event, ServiceTokenEvent):
+    #     api_event = TokenEvent(**service_event.model_dump())
+    # elif isinstance(service_event, ServiceStructuredDataEvent):
+    #     api_event = StructuredDataEvent(**service_event.model_dump())
+    # elif isinstance(service_event, ServiceEndOfStreamEvent):
+    #     api_event = EndOfStreamEvent(**service_event.model_dump())
+    # else:
+    #     # Fallback for unknown event types
+    #     api_event = ErrorEvent(
+    #         message=f"Unknown event type: {type(service_event)}",
+    #         code="UNKNOWN_EVENT_TYPE",
+    #     )
+
+    # return f"data: {api_event.model_dump_json()}\n\n"
+    # return f"data: {event}\n\n"
+    if isinstance(event, BaseModel):
+        payload = event.dict()
     else:
-        # Fallback for unknown event types
-        api_event = ErrorEvent(
-            message=f"Unknown event type: {type(service_event)}",
-            code="UNKNOWN_EVENT_TYPE",
-        )
+        # or if it’s some other object, try JSON‐able encoder
+        payload = jsonable_encoder(event)
 
-    return f"data: {api_event.model_dump_json()}\n\n"
+    # 2) Dump with json.dumps → valid JSON with double quotes
+    json_str = json.dumps(payload, ensure_ascii=False)
+
+    # 3) Prefix with “data: ” and two newlines for SSE
+    return f"data: {json_str}\n\n"
 
 
 def convert_service_exc_to_api_error_event(exc: Exception) -> str:

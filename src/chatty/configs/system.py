@@ -56,7 +56,7 @@ class LLMConfig(BaseModel):
         default=4096, description="Maximum tokens to generate in a response"
     )
     temperature: float = Field(
-        default=0.5, description="Sampling temperature for model responses"
+        default=0.1, description="Sampling temperature for model responses"
     )
     top_p: float = Field(
         default=0.9, description="Top-p sampling parameter for model responses"

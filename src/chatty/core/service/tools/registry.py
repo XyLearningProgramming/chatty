@@ -3,7 +3,7 @@
 from typing import Annotated, List, Type
 
 from fastapi import Depends
-from langchain.tools import BaseTool
+from langchain.tools import BaseTool, Tool
 
 from chatty.configs.config import get_app_config
 from chatty.configs.persona import PersonaToolConfig
@@ -11,7 +11,11 @@ from chatty.infra import singleton
 
 from .model import ToolBuilder
 from .processors import HtmlHeadTitleMeta, Processor, with_processors
+from .struct_tool import emit_structured_tool
 from .url_tool import FixedURLTool
+
+NONE_TOOL = Tool(name="none", func=lambda: "no action", description="Do nothing")
+FIXED_TOOLS = [emit_structured_tool, NONE_TOOL]
 
 
 class ToolRegistry:
@@ -59,7 +63,7 @@ class ToolRegistry:
 
     def get_tools(self) -> List[BaseTool]:
         """Get loaded tools."""
-        return self._tools[:]
+        return self._tools[:] + FIXED_TOOLS
 
 
 # Global registry instance

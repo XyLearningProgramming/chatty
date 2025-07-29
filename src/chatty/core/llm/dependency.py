@@ -3,7 +3,6 @@
 from typing import Annotated
 
 from fastapi import Depends
-from langchain_core.language_models import BaseLanguageModel
 from langchain_openai import ChatOpenAI
 
 from chatty.configs.config import get_app_config
@@ -12,7 +11,7 @@ from chatty.configs.system import LLMConfig
 
 def get_llm(
     config: Annotated[LLMConfig, Depends(lambda: get_app_config().llm)],
-) -> BaseLanguageModel:
+) -> ChatOpenAI:
     """Create and return a ChatOpenAI instance with the provided configuration.
 
     Args:
