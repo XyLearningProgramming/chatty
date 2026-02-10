@@ -14,6 +14,7 @@ from chatty.infra import singleton
 
 from .persona import PersonaConfig
 from .system import APIConfig, CacheConfig, ChatConfig, LLMConfig, ThirdPartyConfig
+from .tools import ToolConfig
 
 # Define paths relative to this file.
 
@@ -73,6 +74,11 @@ class AppConfig(BaseSettings):
     persona: PersonaConfig = Field(
         default_factory=PersonaConfig,
         description="Author persona configuration",
+    )
+
+    tools: list[ToolConfig] = Field(
+        default_factory=list,
+        description="Agent tool definitions (top-level, shared)",
     )
 
     @classmethod

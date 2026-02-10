@@ -13,8 +13,8 @@ from chatty.core.service import (
 
 from .models import (
     ChatRequest,
-    convert_service_event_to_api_event,
-    convert_service_exc_to_api_error_event,
+    format_error_sse,
+    format_sse,
 )
 
 STREAMING_RESPONSE_MEDIA_TYPE = "text/plain"
@@ -27,16 +27,17 @@ STREAMING_RESPONSE_HEADERS = {
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
 
-async def stream_chat_response(request, service) -> AsyncGenerator[str, None]:
+async def stream_chat_response(
+    request: ChatRequest, service: ChatService
+) -> AsyncGenerator[str, None]:
+    """Iterate domain events from the service and serialize to SSE."""
     try:
-        async for service_event in service.stream_response(request.query):
-            yield convert_service_event_to_api_event(service_event)
+        async for event in service.stream_response(request.query):
+            yield format_sse(event)
     except asyncio.CancelledError:
-        # The `stream_response` generator itself will see this Cancellation
-        # from yield at its next await, so it can clean up there.
-        raise  # Raise again without wrapping into an error event.
+        raise
     except Exception as e:
-        yield convert_service_exc_to_api_error_event(e)
+        yield format_error_sse(e)
 
 
 @router.post("/chat")
@@ -44,17 +45,17 @@ async def chat(
     chat_request: ChatRequest,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> StreamingResponse:
-    """
-    Process a chat request and return a streaming response.
+    """Process a chat request and return a streaming response.
 
     The response is a stream of Server-Sent Events, where each event
-    is a JSON object representing different types of data:
-    - token: Streaming text tokens
-    - structured_data: JSON objects for frontend rendering
-    - end_of_stream: Marks the end of the response
-    - error: Error information
+    is a JSON object with a ``type`` discriminator:
 
-    Handles client disconnection by cancelling ongoing LLM processing.
+    - **thinking**: agent internal reasoning
+    - **content**: user-facing streamed text tokens
+    - **tool_call**: tool invocation lifecycle (started / completed / error)
+    - **error**: stream-level error
+
+    Stream ends when the connection is closed.
     """
     return StreamingResponse(
         stream_chat_response(chat_request, chat_service),

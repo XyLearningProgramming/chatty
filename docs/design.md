@@ -31,6 +31,7 @@ The system will consist of the following key components:
 | **Vector Database**   | **PostgreSQL + pgvector**                | Leverages existing provisioned infrastructure. A robust and scalable solution for vector storage and semantic search.                                                 |
 | **Caching**           | **Redis**                                | Industry-standard in-memory data store, perfect for caching frequently accessed data and reducing latency.                                                          |
 | **Model Server**      | **Qwen3 0.6B**                           | As specified in the requirements.                                                                                                                                   |
+| **Agent Framework**    | **LangGraph + langchain-core** | Prebuilt ReAct agent with native function calling and structured streaming. Replaces legacy LangChain AgentExecutor.                                                 |
 | **Knowledge Ingestion**| **Python + LangChain**        | These libraries provide robust tools for document loading, chunking, and vectorization, simplifying the RAG pipeline implementation.                                 |
 
 ### 2.2. Resource Allocation
@@ -80,38 +81,29 @@ To provide a more dynamic and intelligent response, the system will use a three-
 ```python
 # Pseudo-code for the multi-agent pipeline
 
-from langchain.agents import AgentExecutor, create_react_agent
-# Assume other necessary components are defined (e.g., llm, tools, prompts)
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.prebuilt import create_react_agent
 
-# 1. Create the Retriever Agent
-retriever_agent = create_react_agent(llm, retriever_tools, retriever_prompt)
-retriever_executor = AgentExecutor(
-    agent=retriever_agent,
+# 1. Create the LangGraph ReAct agent
+agent = create_react_agent(
+    model=llm,
     tools=retriever_tools,
-    verbose=True,
-    max_iterations=8,
-    early_stopping_method="generate",
-    handle_parsing_errors=False
 )
 
 # 2. Define the full pipeline
-def run_full_pipeline(user_query: str):
-    # Step 1: Check for relevance
-    if not relevancy_check_chain.invoke({"query": user_query}):
-        return "I can only answer questions about my professional experience."
+async def run_full_pipeline(user_query: str):
+    system_msg = SystemMessage(content="You are a tech expert...")
+    human_msg = HumanMessage(content=user_query)
 
-    # Step 2: Run the retriever agent to get context
-    retrieved_context = retriever_executor.invoke({
-        "input": user_query
-    })
-
-    # Step 3: Run the answering agent with the retrieved context
-    final_answer = answerer_chain.invoke({
-        "query": user_query,
-        "context": retrieved_context["output"]
-    })
-
-    return final_answer
+    # Stream domain events from the agent
+    async for chunk, metadata in agent.astream(
+        {"messages": [system_msg, human_msg]},
+        stream_mode="messages",
+    ):
+        # Map raw LangGraph chunks to domain events
+        event = map_chunk_to_domain_event(chunk, metadata)
+        if event:
+            yield event
 ```
 
 ### 3.2. Customizable Tools for the Retriever Agent
@@ -211,59 +203,19 @@ if similar_docs and similar_docs[0][1] > 0.95: # Score represents similarity
 # TODO: mark frequency += 1; if frequent, then add to cache
 ```
 
-### 3.4. LLM Response Token Processing and Structured Output
+### 3.4. Agent Framework
 
-A lightweight token-level state machine is appended to streaming LLM responses, providing brief token buffering and structured output detection during the streaming process.
+The chatbot uses a **LangGraph prebuilt ReAct agent** (`langgraph.prebuilt.create_react_agent`) which provides:
 
-**Token Processing State Machine:**
+- **Native function calling** instead of text-based ReAct parsing.
+- **Structured streaming** via `.astream(stream_mode="messages")` yielding `(BaseMessageChunk, metadata)` tuples.
+- **System prompt as plain text** — persona description only, no template boilerplate.
 
-```python
-# Pseudo-code for token processing state machine
-class TokenProcessor:
-    def __init__(self):
-        self.state = TokenState.STREAMING
-        self.buffer = ""
-        self.json_buffer = ""
-        self.structured_data = None
-        
-    async def process_token(self, token: str, writer):
-        """Process each token from LLM stream"""
-            # Check for JSON block start markers
-            self.buffer += token
-            if "```json" in self.buffer.lower():
-                self.state = TokenState.DETECTING_JSON
-                self.json_buffer = ""
-                # Send buffered tokens before JSON block
-                await self._send_content_tokens(writer)
-                self.buffer = ""
-            else:
-                # Send token immediately if buffer gets too long
-                if len(self.buffer) > 10:
-                    await self._send_content_tokens(writer)
-        elif self.state == TokenState.DETECTING_JSON:
-            self.json_buffer += token
-            if "
-" in token:  # Found newline after ```json
-                self.state = TokenState.BUFFERING_JSON
-        elif self.state == TokenState.BUFFERING_JSON:
-            self.json_buffer += token
-            if "```" in token:  # End of JSON block
-                await self._parse_and_send_structured_data(writer)
-                self.state = TokenState.STREAMING
-                
-```
-
-**Key Features:**
-
-1. **Minimal Buffering:** Only buffers tokens when detecting structured output patterns
-2. **Real-time Streaming:** Most tokens sent immediately to maintain responsiveness  
-3. **Pattern Detection:** Uses state machine to detect ```json blocks during streaming
-4. **Fallback Handling:** Invalid JSON falls back to regular content streaming
-5. **No Persistent Cache:** Processes tokens in real-time without storing responses
+A lightweight **async stream mapper** (`core/service/stream.py`) transforms LangGraph's raw message chunks into clean domain events before they reach the API layer.
 
 ### 3.5. API Design
 
-The API is designed to be simple, stateless, and streaming-first. This provides a superior user experience by displaying the response as it is generated. The server will send a stream of Server-Sent Events (SSE), where each event is a JSON object with a defined `type`.
+The API is simple, stateless, and streaming-first. The server sends a stream of Server-Sent Events (SSE), where each event is a JSON object with a `type` discriminator. The stream ends when the connection is closed — there is no explicit end-of-stream marker.
 
 **Endpoint:** `POST /api/v1/chat`
 
@@ -278,28 +230,44 @@ The API is designed to be simple, stateless, and streaming-first. This provides 
 
 **Response Stream:**
 
-The response is a stream of JSON objects, sent line by line. The frontend client will listen for these events and process them accordingly.
+The response is a stream of JSON objects, sent line by line as SSE `data:` frames. The frontend client listens for these events and processes them by type.
+
+**Event Types:**
+
+| Type | Purpose | Key Fields |
+| --- | --- | --- |
+| `content` | User-facing streamed text tokens (final answer) | `content` |
+| `thinking` | Agent internal reasoning | `content` |
+| `tool_call` | Tool invocation lifecycle | `name`, `status`, `arguments`, `result` |
+| `error` | Stream-level error | `message`, `code` |
 
 **Example Stream Sequence:**
 
-1.  **Token Stream:** The natural language response is streamed token by token.
+1.  **Thinking:** The agent reasons about the query.
     ```json
-    {"type": "token", "content": "Of course"}
-    {"type": "token", "content": ", I can"}
-    {"type": "token", "content": " certainly"}
-    {"type": "token", "content": " write a"}
-    {"type": "token", "content": " blog post"}
-    {"type": "token", "content": " about that."}
+    {"type": "thinking", "content": "The user is asking about AI trends..."}
     ```
 
-2.  **Structured Data:** If the response includes structured data, it is sent as a single, complete JSON object. This ensures the frontend receives a valid, parseable object.
+2.  **Tool Call (started):** The agent invokes a tool.
     ```json
-    {"type": "structured_data", "data": {"title": "The Future of AI", "url": "/blog/ai-future"}}
+    {"type": "tool_call", "name": "search_website", "status": "started", "arguments": {"url": "https://example.com"}, "result": null}
     ```
 
-3.  **End of Stream:** A final message indicates that the response is complete.
+3.  **Tool Call (completed):** The tool returns a result.
     ```json
-    {"type": "end_of_stream"}
+    {"type": "tool_call", "name": "search_website", "status": "completed", "arguments": null, "result": "Found 3 relevant articles..."}
+    ```
+
+4.  **Content Stream:** The final answer is streamed token by token.
+    ```json
+    {"type": "content", "content": "Based on my research"}
+    {"type": "content", "content": ", here are the key trends"}
+    {"type": "content", "content": " in AI for 2026..."}
+    ```
+
+5.  **Error (if any):** An error event is sent if something goes wrong.
+    ```json
+    {"type": "error", "message": "An error occurred during processing", "code": "PROCESSING_ERROR"}
     ```
 
 This event-driven approach provides a clear, robust, and easily extensible protocol for communication between the backend and frontend.
@@ -346,17 +314,30 @@ src/
     ├── __init__.py
     ├── api/
     │   ├── __init__.py
-    │   ├── chat.py
-    │   └── models.py
+    │   ├── chat.py          # FastAPI endpoint, SSE streaming
+    │   └── models.py        # Request/response Pydantic models
     ├── core/
     │   ├── __init__.py
-    │   ├── knowledge.py
-    │   ├── synthesis.py
-    │   ├── memory.py
-    │   └── generation.py
+    │   ├── llm/
+    │   │   └── dependency.py # ChatOpenAI factory
+    │   └── service/
+    │       ├── models.py     # Domain StreamEvent schema + ChatService ABC
+    │       ├── stream.py     # Async mapper: LangGraph messages → domain events
+    │       ├── one_step.py   # LangGraph prebuilt ReAct agent service
+    │       ├── prompt.py     # System prompt template
+    │       ├── dependency.py # ChatService factory / DI
+    │       └── tools/
+    │           ├── model.py      # ToolBuilder protocol
+    │           ├── registry.py   # Tool registry
+    │           ├── url_tool.py   # URL fetching tool
+    │           └── processors.py # Content processors
+    ├── configs/
+    │   ├── config.py         # AppConfig (pydantic-settings)
+    │   ├── system.py         # Infrastructure configs
+    │   └── persona.py        # Persona configs
     ├── infra/
     │   ├── __init__.py
-    │   └── vector_db.py
+    │   └── singleton.py
     └── app.py
 ```
 
@@ -364,12 +345,11 @@ src/
 
 *   **`app.py`**: Initializes the FastAPI application and includes the feature-level routers from `api`.
 *   **`api/chat.py`**: Defines the FastAPI endpoint for chat, handles HTTP requests and responses, and orchestrates calls to the `core` services.
-*   **`api/models.py`**: Defines the Pydantic models for the chat API.
-*   **`core/knowledge.py`**: Contains the implementation of the Knowledge Agent, including its tools for data retrieval and context gathering.
-*   **`core/synthesis.py`**: Contains the implementation of the Synthesis Agent for combining information into coherent responses.
-*   **`core/memory.py`**: Implements semantic memory business logic including admission policies, similarity thresholds, frequency tracking, and LFU eviction strategies.
-*   **`core/generation.py`**: Handles text generation and token processing state machine for streaming responses.
-*   **`infra/vector_db.py`**: Provides an abstraction layer for interacting with the vector database.
+*   **`api/models.py`**: Defines request Pydantic models and SSE serialization helpers. Domain event types are imported from `core/service/models.py`.
+*   **`core/service/models.py`**: Defines the domain `StreamEvent` schema (`ThinkingEvent`, `ContentEvent`, `ToolCallEvent`, `ErrorEvent`) and the abstract `ChatService` base class.
+*   **`core/service/stream.py`**: Async stream mapper that transforms LangGraph's raw `(message_chunk, metadata)` tuples into domain `StreamEvent` instances.
+*   **`core/service/one_step.py`**: LangGraph prebuilt ReAct agent implementation of `ChatService`.
+*   **`infra/vector_db.py`**: Provides an abstraction layer for interacting with the vector database (planned).
 
 ---
 

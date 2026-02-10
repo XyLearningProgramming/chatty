@@ -3,18 +3,19 @@
 from abc import abstractmethod
 from typing import Protocol, Self
 
-from chatty.configs.persona import PersonaToolConfig
+from chatty.configs.tools import ToolConfig
 
 
 class ToolBuilder(Protocol):
-    """Abstract base class for building tools."""
+    """Protocol for tool builders that can create tools from config."""
 
     @property
     def tool_type(self) -> str:
         """Return the tool type this builder handles."""
         return ""
 
+    @classmethod
     @abstractmethod
-    def from_config(self, config: PersonaToolConfig) -> Self:
+    def from_config(cls, config: ToolConfig) -> Self:
         """Build a tool from configuration."""
-        pass
+        ...

@@ -1,21 +1,17 @@
-"""Modern tool registry for langchain agents."""
+"""Tool registry for LangGraph agents."""
 
-from typing import Annotated, List, Type
+from typing import Annotated, Type
 
 from fastapi import Depends
-from langchain.tools import BaseTool, Tool
+from langchain_core.tools import BaseTool
 
 from chatty.configs.config import get_app_config
-from chatty.configs.persona import PersonaToolConfig
+from chatty.configs.tools import ToolConfig
 from chatty.infra import singleton
 
 from .model import ToolBuilder
 from .processors import HtmlHeadTitleMeta, Processor, with_processors
-from .struct_tool import emit_structured_tool
 from .url_tool import FixedURLTool
-
-NONE_TOOL = Tool(name="none", func=lambda: "no action", description="Do nothing")
-FIXED_TOOLS = [emit_structured_tool, NONE_TOOL]
 
 
 class ToolRegistry:
@@ -28,9 +24,9 @@ class ToolRegistry:
         cls.processor_name: cls for cls in [HtmlHeadTitleMeta]
     }
 
-    def __init__(self, configs: list[PersonaToolConfig]):
+    def __init__(self, configs: list[ToolConfig]):
         """Initialize registry and create tools from configuration."""
-        self._tools: List[BaseTool] = []
+        self._tools: list[BaseTool] = []
 
         for config in configs:
             # Find the appropriate tool builder
@@ -49,7 +45,9 @@ class ToolRegistry:
 
             self._tools.append(tool)
 
-    def _apply_processors(self, tool: BaseTool, processor_names: list[str]) -> BaseTool:
+    def _apply_processors(
+        self, tool: BaseTool, processor_names: list[str]
+    ) -> BaseTool:
         """Apply processors to a tool instance."""
         processors = []
         for processor_name in processor_names:
@@ -61,16 +59,17 @@ class ToolRegistry:
             processors.append(processor_class())
         return with_processors(*processors)(tool)
 
-    def get_tools(self) -> List[BaseTool]:
+    def get_tools(self) -> list[BaseTool]:
         """Get loaded tools."""
-        return self._tools[:] + FIXED_TOOLS
+        return self._tools[:]
 
 
 # Global registry instance
 @singleton
 def get_tool_registry(
     config: Annotated[
-        list[PersonaToolConfig], Depends(lambda: get_app_config().persona.tools)
+        list[ToolConfig],
+        Depends(lambda: get_app_config().tools),
     ],
 ) -> ToolRegistry:
     """Get the global tool registry instance."""

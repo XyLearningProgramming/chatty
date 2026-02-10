@@ -1,66 +1,58 @@
-"""Simple URL tool implementation."""
+"""URL tool: fetches content from a pre-configured URL.
+
+The URL is a hidden config arg — the model only sees the tool's
+name and description.  It calls the tool with no arguments and gets
+back the fetched content (optionally processed).
+"""
 
 from typing import Self
 
 import httpx
-from langchain.tools import BaseTool
+from langchain_core.tools import BaseTool
 
-from chatty.configs import PersonaToolConfig
+from chatty.configs.tools import ToolConfig
 
 
 class FixedURLTool(BaseTool):
-    """Tool for fetching website content."""
+    """Tool that fetches content from a fixed, pre-configured URL."""
 
-    # Tool-specific configuration
-    url: str | None = None
+    # Hidden config — not exposed to the model
+    url: str = ""
     timeout: int = 30
     max_content_length: int = 1000
 
-    def _run(
-        self,
-        *args,
-        **kwargs,
-    ) -> str:
-        """Fetch website content synchronously."""
-        import requests
+    def _run(self, *args, **kwargs) -> str:
+        """Fetch content synchronously (fallback)."""
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.get(self.url)
+            response.raise_for_status()
+            return self._truncate(response.text)
 
-        response = requests.get(self.url, timeout=self.timeout)
-        response.raise_for_status()
-
-        content = response.text
-        if len(content) > self.max_content_length:
-            content = content[: self.max_content_length] + "..."
-
-        return content
-
-    async def _arun(
-        self,
-        *args,
-        **kwargs,
-    ) -> str:
-        """Fetch website content asynchronously."""
+    async def _arun(self, *args, **kwargs) -> str:
+        """Fetch content asynchronously."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.get(self.url)
             response.raise_for_status()
+            return self._truncate(response.text)
 
-            content = response.text
-            if len(content) > self.max_content_length:
-                content = content[: self.max_content_length] + "..."
+    def _truncate(self, content: str) -> str:
+        if len(content) > self.max_content_length:
+            return content[: self.max_content_length] + "..."
+        return content
 
-            return content
-
-    @staticmethod
-    def from_config(config: PersonaToolConfig) -> Self:
-        """Build URL tool from configuration."""
-        return FixedURLTool(
+    @classmethod
+    def from_config(cls, config: ToolConfig) -> Self:
+        """Build URL tool from YAML configuration."""
+        return cls(
             name=config.name,
-            description=config.description,
-            url=config.args.get("url", None),
-            args_schema=config.arg_schema,
-            # timeout=config.timeout,
-            # max_content_length=config.max_content_length,
+            description=config.description or "",
+            url=config.args.get("url", ""),
+            timeout=config.args.get("timeout", 30),
+            max_content_length=config.args.get(
+                "max_content_length", 1000
+            ),
         )
 
 
-# Add class attribute after class definition to avoid Pydantic interference
+# Set after class definition to avoid Pydantic interference
 FixedURLTool.tool_type = "url"

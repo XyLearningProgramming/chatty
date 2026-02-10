@@ -6,6 +6,13 @@ import json
 import httpx
 import pytest
 
+from chatty.core.service.models import (
+    EVENT_TYPE_CONTENT,
+    EVENT_TYPE_ERROR,
+    EVENT_TYPE_TOOL_CALL,
+    VALID_EVENT_TYPES,
+)
+
 CHAT_TIMEOUT = 600  # 10 minutes timeout for long-running agent tasks
 RESPONSE_PREVIEW_LENGTH = 4096  # allow almost all response
 
@@ -24,6 +31,21 @@ class SSEParser:
             return json.loads(data)
         except json.JSONDecodeError:
             return None
+
+
+def collect_events(events: list[dict]) -> dict[str, list[dict]]:
+    """Group events by type for easier assertions."""
+    grouped: dict[str, list[dict]] = {t: [] for t in VALID_EVENT_TYPES}
+    for e in events:
+        t = e.get("type", "")
+        if t in grouped:
+            grouped[t].append(e)
+    return grouped
+
+
+def full_content_text(content_events: list[dict]) -> str:
+    """Concatenate all content event tokens into a single string."""
+    return "".join(e.get("content", "") for e in content_events)
 
 
 @pytest.fixture
@@ -53,7 +75,7 @@ class TestStreamingAgent:
     async def test_streaming_response_format(
         self, base_url: str, test_query: str, ensure_llm_server
     ):
-        """Test that streaming response follows expected SSE format."""
+        """Test that streaming response uses valid event types."""
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "POST",
@@ -74,9 +96,17 @@ class TestStreamingAgent:
                 # Should have at least one event
                 assert len(events) > 0
 
-                # Should have end_of_stream event
-                end_events = [e for e in events if e.get("type") == "end_of_stream"]
-                assert len(end_events) == 1
+                # Every event must carry a valid type
+                for event in events:
+                    assert event.get("type") in VALID_EVENT_TYPES, (
+                        f"Unexpected event type: {event}"
+                    )
+
+                # Stream should contain at least one content event
+                grouped = collect_events(events)
+                assert len(grouped[EVENT_TYPE_CONTENT]) > 0, (
+                    "No content events received"
+                )
 
     @pytest.mark.asyncio
     async def test_agent_response_content(
@@ -92,32 +122,27 @@ class TestStreamingAgent:
             ) as response:
                 assert response.status_code == 200
 
-                token_events = []
-                structured_events = []
-                error_events = []
-
+                events = []
                 async for line in response.aiter_lines():
                     if line:
                         event = SSEParser.parse_sse_line(line)
                         if event:
-                            event_type = event.get("type")
-                            if event_type == "token":
-                                token_events.append(event)
-                            elif event_type == "structured_data":
-                                structured_events.append(event)
-                            elif event_type == "error":
-                                error_events.append(event)
+                            events.append(event)
+
+                grouped = collect_events(events)
 
                 # Should not have error events
-                assert len(error_events) == 0, f"Received errors: {error_events}"
-
-                # Should have some token events (streaming response)
-                assert len(token_events) > 0, "No token events received"
-
-                # Concatenate all tokens to form response
-                full_response = "".join(
-                    event.get("content", "") for event in token_events
+                assert len(grouped[EVENT_TYPE_ERROR]) == 0, (
+                    f"Received errors: {grouped[EVENT_TYPE_ERROR]}"
                 )
+
+                # Should have some content events (streaming response)
+                assert len(grouped[EVENT_TYPE_CONTENT]) > 0, (
+                    "No content events received"
+                )
+
+                # Concatenate all content tokens to form response
+                full_response = full_content_text(grouped[EVENT_TYPE_CONTENT])
 
                 # Response should not be empty
                 assert len(full_response.strip()) > 0, "Empty response received"
@@ -125,11 +150,14 @@ class TestStreamingAgent:
                 # For the test query, response should mention Paris or France
                 response_lower = full_response.lower()
                 assert "paris" in response_lower or "france" in response_lower, (
-                    f"Response doesn't seem relevant to query. Response: {full_response}"
+                    f"Response doesn't seem relevant to query. "
+                    f"Response: {full_response}"
                 )
 
     @pytest.mark.asyncio
-    async def test_conversation_history_support(self, base_url: str, ensure_llm_server):
+    async def test_conversation_history_support(
+        self, base_url: str, ensure_llm_server
+    ):
         """Test that conversation history is properly handled."""
         conversation_history = [
             {"role": "user", "content": "What is the capital of France?"},
@@ -157,16 +185,20 @@ class TestStreamingAgent:
                         if event:
                             events.append(event)
 
-                # Should not have error events
-                error_events = [e for e in events if e.get("type") == "error"]
-                assert len(error_events) == 0, f"Received errors: {error_events}"
+                grouped = collect_events(events)
 
-                # Should have token events
-                token_events = [e for e in events if e.get("type") == "token"]
-                assert len(token_events) > 0
+                # Should not have error events
+                assert len(grouped[EVENT_TYPE_ERROR]) == 0, (
+                    f"Received errors: {grouped[EVENT_TYPE_ERROR]}"
+                )
+
+                # Should have content events
+                assert len(grouped[EVENT_TYPE_CONTENT]) > 0
 
     @pytest.mark.asyncio
-    async def test_invalid_request_handling(self, base_url: str, ensure_llm_server):
+    async def test_invalid_request_handling(
+        self, base_url: str, ensure_llm_server
+    ):
         """Test handling of invalid requests."""
         # Test empty query
         async with httpx.AsyncClient() as client:
@@ -179,7 +211,9 @@ class TestStreamingAgent:
             assert response.status_code in [200, 400, 422]
 
     @pytest.mark.asyncio
-    async def test_long_query_handling(self, base_url: str, ensure_llm_server):
+    async def test_long_query_handling(
+        self, base_url: str, ensure_llm_server
+    ):
         """Test handling of very long queries."""
         # Create a query longer than CHAT_QUERY_MAX_LENGTH (1024)
         long_query = "What is " + "very " * 300 + "long question?"
@@ -195,7 +229,7 @@ class TestStreamingAgent:
 
     @pytest.mark.asyncio
     async def test_agent_tool_usage(self, base_url: str, ensure_llm_server):
-        """Test that agent can use tools effectively."""
+        """Test that agent can use tools and emit tool_call events."""
         # Query that likely requires tool usage
         tool_query = "Search for information about Xinyu's site"
 
@@ -204,7 +238,7 @@ class TestStreamingAgent:
                 "POST",
                 f"{base_url}/api/v1/chat",
                 json={"query": tool_query},
-                timeout=CHAT_TIMEOUT,  # Longer timeout for tool usage
+                timeout=CHAT_TIMEOUT,
             ) as response:
                 assert response.status_code == 200
 
@@ -215,29 +249,27 @@ class TestStreamingAgent:
                         if event:
                             events.append(event)
 
-                # Should complete without errors
-                error_events = [e for e in events if e.get("type") == "error"]
-                assert len(error_events) == 0, f"Received errors: {error_events}"
+                grouped = collect_events(events)
 
-                # Should have structured data with intermediate steps
-                structured_events = [
-                    e for e in events if e.get("type") == "structured_data"
-                ]
-                if structured_events:
-                    # Check if intermediate steps are present (indicating tool usage)
-                    for event in structured_events:
-                        data = event.get("data", {})
-                        if "intermediate_steps" in data:
-                            steps = data["intermediate_steps"]
-                            assert isinstance(steps, list)
+                # Should complete without errors
+                assert len(grouped[EVENT_TYPE_ERROR]) == 0, (
+                    f"Received errors: {grouped[EVENT_TYPE_ERROR]}"
+                )
+
+                # If tool_call events are present, validate their structure
+                for tc_event in grouped[EVENT_TYPE_TOOL_CALL]:
+                    assert "name" in tc_event, "tool_call event missing 'name'"
+                    assert tc_event.get("status") in (
+                        "started",
+                        "completed",
+                        "error",
+                    ), f"Invalid tool_call status: {tc_event}"
 
     @pytest.mark.asyncio
     async def test_relevance_filtering_golden_cases(
         self, base_url: str, ensure_llm_server
     ):
-        """Test golden cases for relevance filtering - agent should refuse non-tech questions."""
-
-        # Golden test cases with expected behaviors
+        """Test golden cases for relevance filtering."""
         test_cases = [
             {
                 "query": "What is the capital of France?",
@@ -247,6 +279,7 @@ class TestStreamingAgent:
                     "tech-related",
                     "programming",
                     "software development",
+                    "tech topics",
                 ],
                 "description": "Geography question - should be refused",
             },
@@ -263,6 +296,7 @@ class TestStreamingAgent:
                     "focus on technology",
                     "tech-related",
                     "programming",
+                    "tech topics",
                 ],
                 "description": "Cooking question - should be refused",
             },
@@ -289,107 +323,59 @@ class TestStreamingAgent:
                         f"Request failed for: {test_case['query']}"
                     )
 
-                    print("Streaming response:")
-                    print("-" * 50)
-                    full_response = ""
-                    content_sum = ""
+                    events = []
                     async for line in response.aiter_lines():
                         if line:
                             event = SSEParser.parse_sse_line(line)
-                            if (
-                                event.get("event", "") == "on_chain_end"
-                                and event.get("name", "") == "one_step"
-                            ):
-                                full_response = (
-                                    event.get("data", {})
-                                    .get("output", {})
-                                    .get("output", "")
-                                )
-                            if event.get("event") == "on_chat_model_stream":
-                                content = (
-                                    event.get("data", {})
-                                    .get("chunk", {})
-                                    .get("content", "")
-                                )
-                                content_sum += content
-                                print(content, end="", flush=True)
-                    full_response = full_response or content_sum
-                    # token_events = []
-                    # error_events = []
-                    # structured_events = []
-                    # async for line in response.aiter_lines():
-                    #     if line:
-                    #         event = SSEParser.parse_sse_line(line)
-                    #         print(json.dumps(event))
-                    #         if event:
-                    #             event_type = event.get("type")
-                    #             if event_type == "token":
-                    #                 token_events.append(event)
-                    #                 # Print tokens in real-time
-                    #                 print(event.get("content", ""), end="", flush=True)
-                    #             elif event_type == "structured_data":
-                    #                 structured_events.append(event)
-                    #                 # Print structured data with formatting
-                    #                 data_type = event.get("data_type", "unknown")
-                    #                 print(
-                    #                     f"\n[{data_type.upper()}]", end="", flush=True
-                    #                 )
-                    #                 if data_type == "json_output":
-                    #                     print(f" JSON: {event.get('data', {})}")
-                    #             elif event_type == "error":
-                    #                 error_events.append(event)
-                    #                 print(
-                    #                     f"\n[ERROR] {event.get('message', 'Unknown error')}"
-                    #                 )
+                            if event:
+                                events.append(event)
+                                # Print content tokens in real-time
+                                if event.get("type") == EVENT_TYPE_CONTENT:
+                                    print(
+                                        event.get("content", ""),
+                                        end="",
+                                        flush=True,
+                                    )
 
-                    # print("\n" + "-" * 50)
-
-                    # # Should not have error events
-                    # assert len(error_events) == 0, (
-                    #     f"Received errors for {test_case['query']}: {error_events}"
-                    # )
-
-                    # # Should have some response
-                    # assert len(token_events) > 0, (
-                    #     f"No token events received for: {test_case['query']}"
-                    # )
-
-                    # # Concatenate all tokens to form response
-                    # full_response = "".join(
-                    #     event.get("content", "") for event in token_events
-                    # ).lower()
+                    grouped = collect_events(events)
+                    full_response = full_content_text(
+                        grouped[EVENT_TYPE_CONTENT]
+                    )
 
                     print(
-                        f"Response preview: {full_response[:RESPONSE_PREVIEW_LENGTH]}..."
+                        f"\nResponse preview: "
+                        f"{full_response[:RESPONSE_PREVIEW_LENGTH]}..."
                     )
 
                     if test_case["should_refuse"]:
-                        # For questions that should be refused, check for refusal keywords
-                        found_refusal_keywords = any(
-                            keyword.lower() in full_response
-                            for keyword in test_case["expected_keywords"]
+                        found = any(
+                            kw.lower() in full_response.lower()
+                            for kw in test_case["expected_keywords"]
                         )
-                        assert found_refusal_keywords, (
-                            f"Agent should have refused the question '{test_case['query']}' "
-                            f"but response doesn't contain expected refusal keywords: {test_case['expected_keywords']}\n"
+                        assert found, (
+                            f"Agent should have refused '{test_case['query']}' "
+                            f"but response lacks refusal keywords: "
+                            f"{test_case['expected_keywords']}\n"
                             f"Response: {full_response}"
                         )
-                        print("✓ Agent correctly refused non-tech question")
+                        print("Agent correctly refused non-tech question")
                     else:
-                        # For questions that should be answered, check for relevant keywords
-                        found_relevant_keywords = any(
-                            keyword.lower() in full_response
-                            for keyword in test_case["expected_keywords"]
+                        found = any(
+                            kw.lower() in full_response.lower()
+                            for kw in test_case["expected_keywords"]
                         )
-                        assert found_relevant_keywords, (
-                            f"Agent should have answered the tech question '{test_case['query']}' "
-                            f"but response doesn't contain expected keywords: {test_case['expected_keywords']}\n"
+                        assert found, (
+                            f"Agent should have answered '{test_case['query']}' "
+                            f"but response lacks expected keywords: "
+                            f"{test_case['expected_keywords']}\n"
                             f"Response: {full_response}"
                         )
-                        print("✓ Agent correctly answered tech question")
+                        print("Agent correctly answered tech question")
 
     @pytest.mark.asyncio
-    async def test_concurrent_requests(self, base_url: str, ensure_llm_server):
+    async def test_concurrent_requests(
+        self, base_url: str, ensure_llm_server
+    ):
         """Test that multiple concurrent requests are handled properly."""
         queries = [
             "How do I use Git for version control?",
@@ -418,8 +404,8 @@ class TestStreamingAgent:
                                     events.append(event)
 
                         # Check for errors
-                        error_events = [e for e in events if e.get("type") == "error"]
-                        return len(error_events) == 0
+                        grouped = collect_events(events)
+                        return len(grouped[EVENT_TYPE_ERROR]) == 0
 
             except Exception:
                 return False

@@ -9,23 +9,28 @@ persona:
     - llm agent dev
     - web dev
     - devops & k8s
-  tools:
-    - name: personal website
-      description: |
-        Xinyu's personal website meta info.
-        Requesting to https://x3huang.dev by default. 
-        Output is of xml format including site head title, author, icon url, description, etc.
-        
-        Example of output:
-          <html>
-            <head>               
-              <title>Xinyu's Digital Space</title>
-              <meta name="description" content="Digital space of Xinyu Huang">
-            </head>
-          </html>
-      tool_type: url
-      args: 
-        url: https://x3huang.dev
-      processors: 
-        - html_head_title_meta
-      arg_schema: null
+
+tools:
+  - name: current_homepage
+    description: |
+      Fetch Xinyu's personal website meta info.
+      Returns HTML head with title, author, icon URL, description, etc.
+      Use this to answer questions about Xinyu's personal site.
+    tool_type: url
+    args:
+      url: https://x3huang.dev
+    processors:
+      - html_head_title_meta
+
+  - name: resume
+    description: |
+      Fetch Xinyu's resume / CV page.
+      Returns HTML head with title and meta info about Xinyu's
+      professional background, skills, and experience.
+      Use this to answer questions about Xinyu's work experience
+      or qualifications.
+    tool_type: url
+    args:
+      url: https://x3huang.dev/resume
+    processors:
+      - html_head_title_meta
