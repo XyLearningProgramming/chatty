@@ -24,7 +24,7 @@ STREAMING_RESPONSE_HEADERS = {
     "Access-Control-Allow-Headers": "Cache-Control",
 }
 
-router = APIRouter(prefix="/api/v1", tags=["chat"])
+router = APIRouter(tags=["chat"])
 
 
 async def stream_chat_response(

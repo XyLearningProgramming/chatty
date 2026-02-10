@@ -1,0 +1,10 @@
+Chatty has been deployed.
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+{{- if .Values.ingress.enabled }}
+Access the application at: https://{{ .Values.DOMAIN }}{{ .Values.ingress.path }}
+{{- end }}
+
+Health check: GET /health

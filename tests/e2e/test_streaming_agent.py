@@ -64,7 +64,7 @@ class TestStreamingAgent:
         """Test that the chat endpoint exists and responds."""
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{base_url}/api/v1/chat",
+                f"{base_url}/api/v1/chatty/chat",
                 json={"query": "test"},
                 timeout=CHAT_TIMEOUT,
             )
@@ -79,7 +79,7 @@ class TestStreamingAgent:
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "POST",
-                f"{base_url}/api/v1/chat",
+                f"{base_url}/api/v1/chatty/chat",
                 json={"query": test_query},
                 timeout=CHAT_TIMEOUT,
             ) as response:
@@ -116,7 +116,7 @@ class TestStreamingAgent:
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "POST",
-                f"{base_url}/api/v1/chat",
+                f"{base_url}/api/v1/chatty/chat",
                 json={"query": test_query},
                 timeout=CHAT_TIMEOUT,
             ) as response:
@@ -169,7 +169,7 @@ class TestStreamingAgent:
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "POST",
-                f"{base_url}/api/v1/chat",
+                f"{base_url}/api/v1/chatty/chat",
                 json={
                     "query": follow_up_query,
                     "conversation_history": conversation_history,
@@ -203,7 +203,7 @@ class TestStreamingAgent:
         # Test empty query
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{base_url}/api/v1/chat",
+                f"{base_url}/api/v1/chatty/chat",
                 json={"query": ""},
                 timeout=CHAT_TIMEOUT,
             )
@@ -220,7 +220,7 @@ class TestStreamingAgent:
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{base_url}/api/v1/chat",
+                f"{base_url}/api/v1/chatty/chat",
                 json={"query": long_query},
                 timeout=CHAT_TIMEOUT,
             )
@@ -236,7 +236,7 @@ class TestStreamingAgent:
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "POST",
-                f"{base_url}/api/v1/chat",
+                f"{base_url}/api/v1/chatty/chat",
                 json={"query": tool_query},
                 timeout=CHAT_TIMEOUT,
             ) as response:
@@ -315,7 +315,7 @@ class TestStreamingAgent:
 
                 async with client.stream(
                     "POST",
-                    f"{base_url}/api/v1/chat",
+                    f"{base_url}/api/v1/chatty/chat",
                     json={"query": test_case["query"]},
                     timeout=CHAT_TIMEOUT,
                 ) as response:
@@ -389,7 +389,7 @@ class TestStreamingAgent:
                 async with httpx.AsyncClient() as client:
                     async with client.stream(
                         "POST",
-                        f"{base_url}/api/v1/chat",
+                        f"{base_url}/api/v1/chatty/chat",
                         json={"query": query},
                         timeout=CHAT_TIMEOUT,
                     ) as response:

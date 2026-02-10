@@ -1,0 +1,16 @@
+# Certificate copied from cert-manager to avoid duplicate requests to acme server.
+# Ref: https://github.com/mittwald/kubernetes-replicator
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.DOMAIN }}-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ include "chatty.fullname" . }}
+  annotations:
+    replicator.v1.mittwald.de/replicate-from: cert-manager/{{ .Values.DOMAIN }}-tls
+type: {{ .Values.tlsCertificate.type }}
+data:
+  tls.key: ""
+  tls.crt: ""
+  ca.crt: ""

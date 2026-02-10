@@ -17,6 +17,12 @@ class ThirdPartyConfig(BaseModel):
 class APIConfig(BaseModel):
     """API configuration settings."""
 
+    route_prefix: str = Field(
+        default="chatty",
+        description="Service prefix inserted between /api/v1 and route names. "
+        "Set to empty string to disable.",
+    )
+
     # Rate limiting for the main /chat endpoint.
     chat_rate_limit_per_second: int = Field(
         default=3, description="API rate limit per minute"

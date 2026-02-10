@@ -143,6 +143,26 @@ class TestFixedURLToolTruncate:
 # ---------------------------------------------------------------------------
 
 
+def _html_response(text: str, status_code: int = 200) -> AsyncMock:
+    """Build a mock httpx.Response that looks like an HTML page."""
+    resp = AsyncMock()
+    resp.text = text
+    resp.content = text.encode()
+    resp.headers = {"content-type": "text/html; charset=utf-8"}
+    resp.raise_for_status = lambda: None
+    return resp
+
+
+def _pdf_response(pdf_bytes: bytes, status_code: int = 200) -> AsyncMock:
+    """Build a mock httpx.Response that looks like a PDF download."""
+    resp = AsyncMock()
+    resp.text = ""  # binary content decoded as text is useless
+    resp.content = pdf_bytes
+    resp.headers = {"content-type": "application/pdf"}
+    resp.raise_for_status = lambda: None
+    return resp
+
+
 class TestFixedURLToolArun:
     """Test async fetch with mocked httpx."""
 
@@ -155,9 +175,9 @@ class TestFixedURLToolArun:
             max_content_length=50,
         )
 
-        mock_response = AsyncMock()
-        mock_response.text = "<html><head><title>Hi</title></head></html>"
-        mock_response.raise_for_status = lambda: None
+        mock_response = _html_response(
+            "<html><head><title>Hi</title></head></html>"
+        )
 
         with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
@@ -180,9 +200,7 @@ class TestFixedURLToolArun:
             max_content_length=10,
         )
 
-        mock_response = AsyncMock()
-        mock_response.text = "x" * 100
-        mock_response.raise_for_status = lambda: None
+        mock_response = _html_response("x" * 100)
 
         with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
@@ -195,6 +213,69 @@ class TestFixedURLToolArun:
             result = await tool._arun()
             assert len(result) == 13  # 10 chars + "..."
             assert result.endswith("...")
+
+
+# ---------------------------------------------------------------------------
+# FixedURLTool – PDF content-type handling
+# ---------------------------------------------------------------------------
+
+
+class TestFixedURLToolPdf:
+    """Test that PDF responses are automatically converted to text."""
+
+    @staticmethod
+    def _make_simple_pdf(text: str = "Hello from PDF") -> bytes:
+        """Create a tiny valid PDF with *pymupdf* for testing."""
+        import pymupdf
+
+        doc = pymupdf.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), text)
+        data = doc.tobytes()
+        doc.close()
+        return data
+
+    def test_is_pdf_detects_application_pdf(self):
+        resp = AsyncMock()
+        resp.headers = {"content-type": "application/pdf"}
+        assert FixedURLTool._is_pdf(resp) is True
+
+    def test_is_pdf_rejects_html(self):
+        resp = AsyncMock()
+        resp.headers = {"content-type": "text/html; charset=utf-8"}
+        assert FixedURLTool._is_pdf(resp) is False
+
+    def test_extract_text_from_pdf(self):
+        from chatty.core.service.tools.url_tool import (
+            _extract_text_from_pdf,
+        )
+
+        pdf_bytes = self._make_simple_pdf("Resume content here")
+        text = _extract_text_from_pdf(pdf_bytes)
+        assert "Resume content here" in text
+
+    @pytest.mark.asyncio
+    async def test_arun_extracts_pdf_text(self):
+        pdf_bytes = self._make_simple_pdf("Software Engineer")
+        tool = FixedURLTool(
+            name="resume",
+            description="d",
+            url="https://example.com/resume",
+            max_content_length=5000,
+        )
+
+        mock_response = _pdf_response(pdf_bytes)
+
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.get.return_value = mock_response
+            MockClient.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            result = await tool._arun()
+            assert "Software Engineer" in result
 
 
 # ---------------------------------------------------------------------------

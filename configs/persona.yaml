@@ -24,13 +24,12 @@ tools:
 
   - name: resume
     description: |
-      Fetch Xinyu's resume / CV page.
-      Returns HTML head with title and meta info about Xinyu's
+      Fetch Xinyu's resume / CV.
+      Returns the full plain-text content of the resume PDF including
       professional background, skills, and experience.
       Use this to answer questions about Xinyu's work experience
       or qualifications.
     tool_type: url
     args:
       url: https://x3huang.dev/resume
-    processors:
-      - html_head_title_meta
+      max_content_length: 8000

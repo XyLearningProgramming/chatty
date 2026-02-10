@@ -6,6 +6,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 
 from chatty.api.chat import router as chat_router
+from chatty.configs.config import get_app_config
 
 
 @asynccontextmanager
@@ -26,8 +27,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # TODO: Cleanup connections
 
 
+def _build_api_prefix(route_prefix: str) -> str:
+    """Build the API prefix from the configurable route prefix.
+
+    Result is ``/api/v1/<route_prefix>`` when *route_prefix* is non-empty,
+    otherwise just ``/api/v1``.
+    """
+    base = "/api/v1"
+    if route_prefix:
+        return f"{base}/{route_prefix.strip('/')}"
+    return base
+
+
 def get_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    config = get_app_config()
+
     app = FastAPI(
         title="Chatty",
         description="A persona-driven chatbot with multi-agent pipeline",
@@ -45,8 +60,9 @@ def get_app() -> FastAPI:
     #     allow_headers=["*"],
     # )
 
-    # Include routers
-    app.include_router(chat_router)
+    # Include routers with configurable prefix
+    api_prefix = _build_api_prefix(config.api.route_prefix)
+    app.include_router(chat_router, prefix=api_prefix)
 
     app.get("/health")(lambda: "ok")
 

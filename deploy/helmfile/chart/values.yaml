@@ -1,0 +1,86 @@
+# Default values for chatty.
+# This is a YAML-formatted file.
+
+replicaCount: 1
+
+tlsCertificate:
+  type: kubernetes.io/tls
+
+image:
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+
+securityContext: {}
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    kubernetes.io/ingress.class: traefik
+  path: /api/v1/chatty
+  pathType: Prefix
+
+# Tight resource limits for 1G/1CPU VPS
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 10m
+    memory: 32Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 15
+  timeoutSeconds: 2
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  timeoutSeconds: 2
+  periodSeconds: 5
+  failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 99
+
+volumes: {}
+
+volumeMounts: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+secretName: helmfile-secret-chatty
