@@ -12,7 +12,9 @@ dependencies = [
     "langchain-core>=0.3.49",
     "langchain-openai>=0.3.28",
     "langgraph>=0.4.1",
+    "prometheus-fastapi-instrumentator>=7.1.0",
     "pydantic-settings>=2.10.1",
+    "redis>=5.0.0",
     "pymupdf>=1.25.3",
     "uvicorn>=0.35.0",
 ]

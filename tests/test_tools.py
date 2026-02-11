@@ -1,12 +1,17 @@
-"""Unit tests for ToolConfig, FixedURLTool, and ToolRegistry."""
+"""Unit tests for ToolConfig, URLDispatcherTool, and ToolRegistry."""
 
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from chatty.configs.tools import ToolConfig
+from chatty.core.service.tools.processors import HtmlHeadTitleMeta
 from chatty.core.service.tools.registry import ToolRegistry
-from chatty.core.service.tools.url_tool import FixedURLTool
+from chatty.core.service.tools.url_tool import (
+    URLDispatcherTool,
+    _extract_text_from_pdf,
+)
 
 # ---------------------------------------------------------------------------
 # ToolConfig
@@ -51,95 +56,150 @@ class TestToolConfig:
 
 
 # ---------------------------------------------------------------------------
-# FixedURLTool.from_config
+# URLDispatcherTool.from_configs
 # ---------------------------------------------------------------------------
 
 
-class TestFixedURLToolFromConfig:
-    """Test building FixedURLTool from ToolConfig."""
+class TestURLDispatcherFromConfigs:
+    """Test building the dispatcher from a list of ToolConfigs."""
 
-    def test_basic_from_config(self):
-        cfg = ToolConfig(
-            name="homepage",
-            description="Get homepage",
-            tool_type="url",
-            args={"url": "https://example.com"},
-        )
-        tool = FixedURLTool.from_config(cfg)
-        assert tool.name == "homepage"
-        assert tool.description == "Get homepage"
-        assert tool.url == "https://example.com"
-        assert tool.timeout == 30  # default
-        assert tool.max_content_length == 1000  # default
+    def test_basic_from_configs(self):
+        configs = [
+            ToolConfig(
+                name="homepage",
+                description="Get homepage",
+                tool_type="url",
+                args={"url": "https://example.com"},
+            ),
+            ToolConfig(
+                name="resume",
+                description="Get resume",
+                tool_type="url",
+                args={"url": "https://example.com/resume"},
+            ),
+        ]
+        tool = URLDispatcherTool.from_configs(configs)
+        assert tool.name == "lookup"
+        assert set(tool.routes.keys()) == {"homepage", "resume"}
+        assert tool.routes["homepage"].args.url == "https://example.com"
+        assert tool.routes["resume"].args.url == "https://example.com/resume"
+
+    def test_single_config(self):
+        configs = [
+            ToolConfig(
+                name="homepage",
+                description="Get homepage",
+                tool_type="url",
+                args={"url": "https://example.com"},
+            ),
+        ]
+        tool = URLDispatcherTool.from_configs(configs)
+        assert tool.name == "lookup"
+        assert set(tool.routes.keys()) == {"homepage"}
 
     def test_custom_timeout_and_max_length(self):
-        cfg = ToolConfig(
-            name="resume",
-            description="Get resume",
-            tool_type="url",
-            args={
-                "url": "https://example.com/resume",
-                "timeout": 5,
-                "max_content_length": 500,
-            },
-        )
-        tool = FixedURLTool.from_config(cfg)
-        assert tool.timeout == 5
-        assert tool.max_content_length == 500
+        configs = [
+            ToolConfig(
+                name="resume",
+                description="Get resume",
+                tool_type="url",
+                args={
+                    "url": "https://example.com/resume",
+                    "timeout": 5,
+                    "max_content_length": 500,
+                },
+            ),
+        ]
+        tool = URLDispatcherTool.from_configs(configs)
+        route = tool.routes["resume"]
+        assert route.args.timeout == timedelta(seconds=5)
+        assert route.args.max_content_length == 500
 
     def test_missing_url_defaults_to_empty(self):
-        cfg = ToolConfig(
-            name="empty",
-            description="No URL",
-            tool_type="url",
-            args={},
-        )
-        tool = FixedURLTool.from_config(cfg)
-        assert tool.url == ""
+        configs = [
+            ToolConfig(
+                name="empty",
+                description="No URL",
+                tool_type="url",
+                args={},
+            ),
+        ]
+        tool = URLDispatcherTool.from_configs(configs)
+        assert tool.routes["empty"].args.url == ""
 
     def test_tool_type_attribute(self):
-        assert FixedURLTool.tool_type == "url"
+        assert URLDispatcherTool.tool_type == "url"
+
+    def test_processors_stored_per_route(self):
+        configs = [
+            ToolConfig(
+                name="homepage",
+                description="d",
+                tool_type="url",
+                args={"url": "http://x"},
+            ),
+            ToolConfig(
+                name="resume",
+                description="d",
+                tool_type="url",
+                args={"url": "http://y"},
+            ),
+        ]
+        processor = HtmlHeadTitleMeta()
+        tool = URLDispatcherTool.from_configs(
+            configs, processors={"homepage": [processor]}
+        )
+        assert len(tool.routes["homepage"].processors) == 1
+        assert len(tool.routes["resume"].processors) == 0
+
+    def test_args_schema_has_enum_and_descriptions(self):
+        configs = [
+            ToolConfig(
+                name="homepage",
+                description="Personal website meta info",
+                tool_type="url",
+                args={"url": "http://x"},
+            ),
+            ToolConfig(
+                name="resume",
+                description="Full resume PDF content",
+                tool_type="url",
+                args={"url": "http://y"},
+            ),
+        ]
+        tool = URLDispatcherTool.from_configs(configs)
+        schema = tool.args_schema.model_json_schema()
+        source_schema = schema["properties"]["source"]
+        # Enum lists valid values
+        assert set(source_schema["enum"]) == {"homepage", "resume"}
+        # Description explains what each source returns
+        assert '"homepage"' in source_schema["description"]
+        assert '"resume"' in source_schema["description"]
+        assert "Personal website meta info" in source_schema["description"]
+        assert "Full resume PDF content" in source_schema["description"]
 
 
 # ---------------------------------------------------------------------------
-# FixedURLTool.truncate
+# URLDispatcherTool._truncate
 # ---------------------------------------------------------------------------
 
 
-class TestFixedURLToolTruncate:
+class TestURLDispatcherTruncate:
     """Test content truncation logic."""
 
     def test_short_content_not_truncated(self):
-        tool = FixedURLTool(
-            name="t",
-            description="d",
-            url="http://x",
-            max_content_length=100,
-        )
-        assert tool._truncate("hello") == "hello"
+        assert URLDispatcherTool._truncate("hello", 100) == "hello"
 
     def test_long_content_truncated(self):
-        tool = FixedURLTool(
-            name="t",
-            description="d",
-            url="http://x",
-            max_content_length=5,
-        )
-        result = tool._truncate("abcdefgh")
+        result = URLDispatcherTool._truncate("abcdefgh", 5)
         assert result == "abcde..."
 
     def test_exact_length_not_truncated(self):
-        tool = FixedURLTool(
-            name="t",
-            description="d",
-            url="http://x",
-            max_content_length=5,
-        )
-        assert tool._truncate("abcde") == "abcde"
+        assert URLDispatcherTool._truncate("abcde", 5) == "abcde"
 
 
 # ---------------------------------------------------------------------------
-# FixedURLTool._arun (async, mocked HTTP)
+# URLDispatcherTool._arun (async, mocked HTTP)
 # ---------------------------------------------------------------------------
 
 
@@ -163,17 +223,20 @@ def _pdf_response(pdf_bytes: bytes, status_code: int = 200) -> AsyncMock:
     return resp
 
 
-class TestFixedURLToolArun:
-    """Test async fetch with mocked httpx."""
+class TestURLDispatcherArun:
+    """Test async fetch dispatch with mocked httpx."""
 
     @pytest.mark.asyncio
-    async def test_arun_fetches_url(self):
-        tool = FixedURLTool(
-            name="homepage",
-            description="d",
-            url="https://example.com",
-            max_content_length=50,
-        )
+    async def test_arun_dispatches_by_name(self):
+        configs = [
+            ToolConfig(
+                name="homepage",
+                description="d",
+                tool_type="url",
+                args={"url": "https://example.com", "max_content_length": 200},
+            ),
+        ]
+        tool = URLDispatcherTool.from_configs(configs)
 
         mock_response = _html_response(
             "<html><head><title>Hi</title></head></html>"
@@ -187,18 +250,21 @@ class TestFixedURLToolArun:
             )
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await tool._arun()
+            result = await tool._arun(source="homepage")
             mock_client.get.assert_called_once_with("https://example.com")
             assert "<html>" in result
 
     @pytest.mark.asyncio
     async def test_arun_truncates_large_response(self):
-        tool = FixedURLTool(
-            name="t",
-            description="d",
-            url="https://example.com",
-            max_content_length=10,
-        )
+        configs = [
+            ToolConfig(
+                name="big",
+                description="d",
+                tool_type="url",
+                args={"url": "https://example.com", "max_content_length": 10},
+            ),
+        ]
+        tool = URLDispatcherTool.from_configs(configs)
 
         mock_response = _html_response("x" * 100)
 
@@ -210,17 +276,32 @@ class TestFixedURLToolArun:
             )
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await tool._arun()
+            result = await tool._arun(source="big")
             assert len(result) == 13  # 10 chars + "..."
             assert result.endswith("...")
 
+    @pytest.mark.asyncio
+    async def test_arun_unknown_name_returns_error_message(self):
+        configs = [
+            ToolConfig(
+                name="homepage",
+                description="d",
+                tool_type="url",
+                args={"url": "http://x"},
+            ),
+        ]
+        tool = URLDispatcherTool.from_configs(configs)
+        result = await tool._arun(source="nonexistent")
+        assert "Unknown source" in result
+        assert "homepage" in result
+
 
 # ---------------------------------------------------------------------------
-# FixedURLTool – PDF content-type handling
+# URLDispatcherTool – PDF content-type handling
 # ---------------------------------------------------------------------------
 
 
-class TestFixedURLToolPdf:
+class TestURLDispatcherPdf:
     """Test that PDF responses are automatically converted to text."""
 
     @staticmethod
@@ -238,18 +319,14 @@ class TestFixedURLToolPdf:
     def test_is_pdf_detects_application_pdf(self):
         resp = AsyncMock()
         resp.headers = {"content-type": "application/pdf"}
-        assert FixedURLTool._is_pdf(resp) is True
+        assert URLDispatcherTool._is_pdf(resp) is True
 
     def test_is_pdf_rejects_html(self):
         resp = AsyncMock()
         resp.headers = {"content-type": "text/html; charset=utf-8"}
-        assert FixedURLTool._is_pdf(resp) is False
+        assert URLDispatcherTool._is_pdf(resp) is False
 
     def test_extract_text_from_pdf(self):
-        from chatty.core.service.tools.url_tool import (
-            _extract_text_from_pdf,
-        )
-
         pdf_bytes = self._make_simple_pdf("Resume content here")
         text = _extract_text_from_pdf(pdf_bytes)
         assert "Resume content here" in text
@@ -257,12 +334,18 @@ class TestFixedURLToolPdf:
     @pytest.mark.asyncio
     async def test_arun_extracts_pdf_text(self):
         pdf_bytes = self._make_simple_pdf("Software Engineer")
-        tool = FixedURLTool(
-            name="resume",
-            description="d",
-            url="https://example.com/resume",
-            max_content_length=5000,
-        )
+        configs = [
+            ToolConfig(
+                name="resume",
+                description="d",
+                tool_type="url",
+                args={
+                    "url": "https://example.com/resume",
+                    "max_content_length": 5000,
+                },
+            ),
+        ]
+        tool = URLDispatcherTool.from_configs(configs)
 
         mock_response = _pdf_response(pdf_bytes)
 
@@ -274,7 +357,7 @@ class TestFixedURLToolPdf:
             )
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await tool._arun()
+            result = await tool._arun(source="resume")
             assert "Software Engineer" in result
 
 
@@ -284,9 +367,9 @@ class TestFixedURLToolPdf:
 
 
 class TestToolRegistry:
-    """Test registry: creation from configs, error handling."""
+    """Test registry: grouping, error handling, and caching."""
 
-    def test_creates_tools_from_configs(self):
+    def test_creates_dispatcher_from_configs(self):
         configs = [
             ToolConfig(
                 name="homepage",
@@ -303,9 +386,9 @@ class TestToolRegistry:
         ]
         registry = ToolRegistry(configs)
         tools = registry.get_tools()
-        assert len(tools) == 2
-        assert tools[0].name == "homepage"
-        assert tools[1].name == "resume"
+        # Two url configs → one dispatcher tool
+        assert len(tools) == 1
+        assert tools[0].name == "lookup"
 
     def test_empty_configs(self):
         registry = ToolRegistry([])
@@ -365,5 +448,9 @@ class TestToolRegistry:
         registry = ToolRegistry(configs)
         tools = registry.get_tools()
         assert len(tools) == 1
-        # Tool should still be callable (processor wraps _run/_arun)
-        assert tools[0].name == "site"
+        assert tools[0].name == "lookup"
+        # Verify the processor was stored in the route
+        dispatcher = tools[0]
+        assert isinstance(dispatcher, URLDispatcherTool)
+        assert len(dispatcher.routes["site"].processors) == 1
+        assert isinstance(dispatcher.routes["site"].processors[0], HtmlHeadTitleMeta)

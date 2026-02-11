@@ -13,12 +13,16 @@ from chatty.core.service.tools.registry import ToolRegistry
 # Event type constants — import these instead of duplicating strings.
 # ---------------------------------------------------------------------------
 
+EVENT_TYPE_QUEUED = "queued"
+EVENT_TYPE_DEQUEUED = "dequeued"
 EVENT_TYPE_THINKING = "thinking"
 EVENT_TYPE_CONTENT = "content"
 EVENT_TYPE_TOOL_CALL = "tool_call"
 EVENT_TYPE_ERROR = "error"
 
 VALID_EVENT_TYPES = frozenset({
+    EVENT_TYPE_QUEUED,
+    EVENT_TYPE_DEQUEUED,
     EVENT_TYPE_THINKING,
     EVENT_TYPE_CONTENT,
     EVENT_TYPE_TOOL_CALL,
@@ -40,6 +44,27 @@ VALID_TOOL_STATUSES = frozenset({
 # ---------------------------------------------------------------------------
 # Domain stream events
 # ---------------------------------------------------------------------------
+
+
+class QueuedEvent(BaseModel):
+    """Request was admitted into the concurrency gate inbox."""
+
+    type: Literal["queued"] = "queued"
+    position: int = Field(description="Current inbox occupancy after admission")
+    message: str = Field(
+        default="Request queued, waiting for available slot",
+        description="Human-readable status message",
+    )
+
+
+class DequeuedEvent(BaseModel):
+    """Concurrency slot acquired — agent run is starting."""
+
+    type: Literal["dequeued"] = "dequeued"
+    message: str = Field(
+        default="Slot acquired, processing request",
+        description="Human-readable status message",
+    )
 
 
 class ThinkingEvent(BaseModel):
@@ -81,7 +106,14 @@ class ErrorEvent(BaseModel):
     code: str | None = Field(default=None, description="Error code")
 
 
-StreamEvent = ThinkingEvent | ContentEvent | ToolCallEvent | ErrorEvent
+StreamEvent = (
+    QueuedEvent
+    | DequeuedEvent
+    | ThinkingEvent
+    | ContentEvent
+    | ToolCallEvent
+    | ErrorEvent
+)
 
 
 # ---------------------------------------------------------------------------

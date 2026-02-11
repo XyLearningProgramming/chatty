@@ -30,7 +30,14 @@ from pydantic_settings import (
 )
 
 from .persona import PersonaConfig
-from .system import APIConfig, CacheConfig, ChatConfig, LLMConfig, ThirdPartyConfig
+from .system import (
+    APIConfig,
+    CacheConfig,
+    ChatConfig,
+    ConcurrencyConfig,
+    LLMConfig,
+    ThirdPartyConfig,
+)
 from .tools import ToolConfig
 
 # ---------------------------------------------------------------------------
@@ -99,6 +106,11 @@ class AppConfig(BaseSettings):
 
     chat: ChatConfig = Field(
         default_factory=ChatConfig, description="Configuration for chat agent."
+    )
+
+    concurrency: ConcurrencyConfig = Field(
+        default_factory=ConcurrencyConfig,
+        description="Concurrency gate settings for LLM agent runs",
     )
 
     persona: PersonaConfig = Field(

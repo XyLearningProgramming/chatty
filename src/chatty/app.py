@@ -5,9 +5,12 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from chatty.api.chat import router as chat_router
 from chatty.configs.config import get_app_config
+from chatty.infra.concurrency import get_concurrency_gate
+from chatty.infra.redis import get_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +21,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup logic
     logger.info("Starting Chatty application...")
 
+    # Redis — tolerant of failure (None → local fallback).
+    redis_client = None
+    try:
+        redis_client = get_redis_client()
+        await redis_client.ping()
+    except Exception:
+        logger.warning("Redis unavailable — falling back to local concurrency backend.")
+
+    # Concurrency gate singleton — first call initialises it.
+    get_concurrency_gate(redis_client)
+
     # TODO: Initialize database connections
-    # TODO: Initialize Redis connections
     # TODO: Initialize model server connections
 
     yield
 
     # Shutdown logic
     logger.info("Shutting down Chatty application...")
+    await get_concurrency_gate().aclose()
+    if redis_client is not None:
+        await redis_client.aclose()
 
 
 def _build_api_prefix(route_prefix: str) -> str:
@@ -66,6 +82,8 @@ def get_app() -> FastAPI:
     app.include_router(chat_router, prefix=api_prefix)
 
     app.get("/health")(lambda: "ok")
+
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
     return app
 

@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from pydantic import BaseModel, Field
 
 
@@ -28,6 +30,13 @@ class APIConfig(BaseModel):
         default=3, description="API rate limit per minute"
     )
 
+    request_timeout: timedelta = Field(
+        default=timedelta(minutes=5),
+        description="Wall-clock timeout for the entire chat request lifecycle "
+        "(queue wait + agent run). The stream is cancelled with an error "
+        "event when exceeded.",
+    )
+
 
 class CacheConfig(BaseModel):
     """Cache of chat responses configuration settings."""
@@ -42,7 +51,10 @@ class CacheConfig(BaseModel):
     admission_count: int = Field(
         default=3, description="Queries needed before caching answer"
     )
-    ttl_hours: int = Field(default=24, description="TTL for dynamic memory entries")
+    ttl: timedelta = Field(
+        default=timedelta(hours=24),
+        description="TTL for dynamic memory entries",
+    )
 
 
 class LLMConfig(BaseModel):
@@ -67,11 +79,35 @@ class LLMConfig(BaseModel):
     top_p: float = Field(
         default=0.9, description="Top-p sampling parameter for model responses"
     )
-    timeout: float = Field(
-        default=300.0, description="Timeout for model requests in seconds"
+    model_timeout: timedelta = Field(
+        default=timedelta(seconds=300),
+        description="Timeout for model requests",
     )
     max_retries: int = Field(
         default=3, description="Maximum number of retries for model requests"
+    )
+
+
+class ConcurrencyConfig(BaseModel):
+    """Concurrency gate settings for LLM agent runs."""
+
+    max_concurrency: int = Field(
+        default=1,
+        description="Maximum number of parallel agent runs (semaphore slots)",
+    )
+    inbox_max_size: int = Field(
+        default=10,
+        description="Maximum requests admitted into the gate at once. "
+        "Overflow is rejected with HTTP 429.",
+    )
+    acquire_timeout: timedelta = Field(
+        default=timedelta(seconds=30),
+        description="Maximum time a queued request waits to acquire a "
+        "concurrency slot before giving up with a 'too busy' error.",
+    )
+    slot_timeout: timedelta = Field(
+        default=timedelta(minutes=10),
+        description="TTL for Redis concurrency keys (crash safety)",
     )
 
 
@@ -84,4 +120,10 @@ class ChatConfig(BaseModel):
 
     max_conversation_length: int = Field(
         default=3, description="Maximum conversation history length"
+    )
+
+    tool_timeout: timedelta = Field(
+        default=timedelta(seconds=60),
+        description="Per-tool execution timeout. Applied to every tool "
+        "invocation (fetch + post-processing).",
     )

@@ -91,3 +91,9 @@ tolerations: []
 affinity: {}
 
 secretName: helmfile-secret-chatty
+
+metrics:
+  podMonitor:
+    enabled: false
+    path: /metrics
+    interval: 67s

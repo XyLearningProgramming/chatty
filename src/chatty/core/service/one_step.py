@@ -7,6 +7,7 @@ from langchain_core.language_models import BaseLanguageModel
 
 from chatty.configs.config import AppConfig
 
+from .metrics import observe_stream_response
 from .models import ChatService, StreamEvent
 from .prompt import (
     PERSONA_CHARACTER_DEFAULT,
@@ -54,6 +55,7 @@ class OneStepChatService(ChatService):
             persona_expertise=persona_expertise,
         )
 
+    @observe_stream_response(chat_service_name)
     async def stream_response(
         self, question: str
     ) -> AsyncGenerator[StreamEvent, None]:

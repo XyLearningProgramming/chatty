@@ -26,7 +26,7 @@ def get_llm(
         model=config.model_name,
         temperature=config.temperature,
         max_tokens=config.max_tokens,
-        timeout=config.timeout,
+        timeout=config.model_timeout.total_seconds(),
         top_p=config.top_p,
         max_retries=config.max_retries,
         streaming=True,
