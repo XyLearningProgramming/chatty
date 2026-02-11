@@ -20,7 +20,11 @@ def get_chat_service(
     tools_registry: Annotated[ToolRegistry, Depends(get_tool_registry)],
     config: Annotated[AppConfig, Depends(lambda: get_app_config())],
 ) -> ChatService:
-    """Factory function to create a configured chat service."""
+    """Factory function to create a configured chat service.
+
+    The returned service is a singleton, but tool definitions are loaded
+    fresh on every request via ``ToolRegistry.get_tools()``.
+    """
     name = config.chat.agent_name
     if name not in _known_agents:
         raise NotImplementedError(f"Agent {name} is not implemented.")

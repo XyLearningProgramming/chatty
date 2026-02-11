@@ -47,10 +47,17 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{/* Inject env vars from the Kubernetes secret */}}
           {{- $secret := lookup "v1" "Secret" .Release.Namespace .Values.secretName }}
+          {{- if or $secret .Values.configMapData }}
           {{- if $secret }}
           envFrom:
             - secretRef:
                 name: {{ .Values.secretName }}
+          {{- end }}
+          {{- if .Values.configMapData }}
+          env:
+            - name: CHATTY_CONFIGMAP_FILE
+              value: {{ .Values.configMapMountPath }}/config.yaml
+          {{- end }}
           {{- end }}
           ports:
             - name: http
@@ -68,13 +75,27 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.volumeMounts }}
+          {{- if or .Values.configMapData .Values.volumeMounts }}
           volumeMounts:
+          {{- if .Values.configMapData }}
+            - name: configmap-yaml
+              mountPath: {{ .Values.configMapMountPath }}
+              readOnly: true
+          {{- end }}
+          {{- with .Values.volumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- with .Values.volumes }}
+          {{- end }}
+      {{- if or .Values.configMapData .Values.volumes }}
       volumes:
+      {{- if .Values.configMapData }}
+        - name: configmap-yaml
+          configMap:
+            name: {{ include "chatty.fullname" . }}-config
+      {{- end }}
+      {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

@@ -1,0 +1,14 @@
+{{- if .Values.configMapData }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chatty.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chatty.labels" . | nindent 4 }}
+data:
+  {{- range $key, $val := .Values.configMapData }}
+  {{ $key }}: |
+    {{- $val | nindent 4 }}
+  {{- end }}
+{{- end }}

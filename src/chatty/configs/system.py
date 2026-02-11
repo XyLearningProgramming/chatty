@@ -4,13 +4,13 @@ from pydantic import BaseModel, Field
 class ThirdPartyConfig(BaseModel):
     """Configuration for third-party integrations."""
 
-    vector_database_uri: str = Field(
-        default="postgresql://user:password@localhost:5432/chatty",
-        description="Vector database connection URI",
+    postgres_uri: str = Field(
+        default="postgresql+asyncpg://app:password@postgres.db.svc.cluster.local:5432/app",
+        description="PostgreSQL connection URI (asyncpg driver for async FastAPI usage)",
     )
     redis_uri: str = Field(
-        default="redis://localhost:6379",
-        description="Redis connection URI",
+        default="redis://:password@redis-master.db.svc.cluster.local:6379/0",
+        description="Redis connection URI (redis-py asyncio compatible)",
     )
 
 

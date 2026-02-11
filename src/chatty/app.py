@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -8,23 +9,23 @@ from fastapi import FastAPI
 from chatty.api.chat import router as chat_router
 from chatty.configs.config import get_app_config
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager for startup/shutdown events."""
     # Startup logic
-    print("Starting Chatty application...")
+    logger.info("Starting Chatty application...")
 
-    # TODO: Initialize vector database connections
+    # TODO: Initialize database connections
     # TODO: Initialize Redis connections
     # TODO: Initialize model server connections
-    # TODO: Load golden dataset for memory
 
     yield
 
     # Shutdown logic
-    print("Shutting down Chatty application...")
-    # TODO: Cleanup connections
+    logger.info("Shutting down Chatty application...")
 
 
 def _build_api_prefix(route_prefix: str) -> str:

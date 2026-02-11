@@ -1,7 +1,83 @@
-# Main configuration file
-# Additional settings can be added here that override other config files
+# Chatty application configuration (single merged config).
+#
+# This file is baked into the Docker image at /app/configs/config.yaml.
+# In Kubernetes the same content is also served as a ConfigMap mounted
+# at /app/configmap/config.yaml (highest priority, hot-reloadable).
+#
+# Secret values should be injected via environment variables / k8s secrets:
+#   CHATTY_LLM__ENDPOINT            – LLM server URL
+#   CHATTY_LLM__API_KEY             – LLM API key
+#   CHATTY_THIRD_PARTY__POSTGRES_URI – PostgreSQL connection URI
+#   CHATTY_THIRD_PARTY__REDIS_URI    – Redis connection URI
 
+# --- LLM (non-secret tunables) ---
 llm:
-  endpoint: "http://localhost:8000/api/v1/"
-  api_key: "default"
+  # endpoint: "http://localhost:8000/api/v1/"  # inject via CHATTY_LLM__ENDPOINT
+  # api_key: ""                                # inject via CHATTY_LLM__API_KEY
   model_name: "gpt-3.5-turbo"
+  max_tokens: 4096
+  temperature: 0.1
+  top_p: 0.9
+  timeout: 300.0
+  max_retries: 3
+
+# --- Third-party (all secrets – inject via env) ---
+# third_party:
+#   postgres_uri: "postgresql+asyncpg://app:password@localhost:5432/app"
+#   redis_uri: "redis://:password@localhost:6379/0"
+
+# --- API ---
+api:
+  route_prefix: chatty
+  chat_rate_limit_per_second: 3
+
+# --- Cache ---
+cache:
+  enabled: true
+  max_size: 30
+  similarity_threshold: 0.95
+  admission_count: 3
+  ttl_hours: 24
+
+# --- Chat ---
+chat:
+  agent_name: one_step
+  max_conversation_length: 3
+
+# --- Persona ---
+persona:
+  name: Xinyu Huang
+  character:
+    - chatty
+    - professional
+    - love to share
+  expertise:
+    - python, golang, cpp
+    - llm agent dev
+    - web dev
+    - devops & k8s
+
+# --- Tools (hot-reloadable via ConfigMap) ---
+tools:
+  - name: current_homepage
+    description: |
+      Fetch Xinyu's personal website meta info.
+      Returns HTML head with title, author, icon URL, description, etc.
+      Use this to answer questions about Xinyu's personal site.
+    tool_type: url
+    args:
+      url: https://x3huang.dev
+    processors:
+      - html_head_title_meta
+
+  - name: resume
+    description: |
+      Fetch Xinyu's resume / CV.
+      Returns the full plain-text content of the resume PDF including
+      professional background, skills, and experience.
+      Use this to answer questions about Xinyu's work experience
+      or qualifications.
+    tool_type: url
+    args:
+      url: https://x3huang.dev/resume
+      max_content_length: 8000

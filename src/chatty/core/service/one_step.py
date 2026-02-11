@@ -18,7 +18,11 @@ from .tools.registry import ToolRegistry
 
 
 class OneStepChatService(ChatService):
-    """Chat service powered by LangGraph ReAct agent."""
+    """Chat service powered by LangGraph ReAct agent.
+
+    The agent graph is rebuilt on every request so that hot-reloaded tool
+    definitions from the ConfigMap are picked up immediately.
+    """
 
     chat_service_name = "one_step"
 
@@ -28,7 +32,10 @@ class OneStepChatService(ChatService):
         tools_registry: ToolRegistry,
         config: AppConfig,
     ):
-        """Initialize chat service with LangGraph agent."""
+        """Store references for per-request agent creation."""
+        self._llm = llm
+        self._tools_registry = tools_registry
+
         persona = config.persona
         persona_character = (
             ", ".join(persona.character)
@@ -41,17 +48,10 @@ class OneStepChatService(ChatService):
             else PERSONA_EXPERTISE_DEFAULT
         )
 
-        system_prompt = SYSTEM_PROMPT.format(
+        self._system_prompt = SYSTEM_PROMPT.format(
             persona_name=persona.name,
             persona_character=persona_character,
             persona_expertise=persona_expertise,
-        )
-
-        # LangGraph agent with first-class system_prompt support.
-        self._graph = create_agent(
-            model=llm,
-            tools=tools_registry.get_tools(),
-            system_prompt=system_prompt,
         )
 
     async def stream_response(
@@ -59,11 +59,16 @@ class OneStepChatService(ChatService):
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream domain events for a user question.
 
-        Uses ``stream_mode="messages"`` which yields
-        ``(BaseMessageChunk, metadata)`` tuples that the stream mapper
-        converts into domain ``StreamEvent`` instances.
+        The LangGraph agent is created fresh each request so that the
+        latest tool definitions from YAML files (including ConfigMap)
+        are always used.
         """
-        raw_stream = self._graph.astream(
+        graph = create_agent(
+            model=self._llm,
+            tools=self._tools_registry.get_tools(),
+            system_prompt=self._system_prompt,
+        )
+        raw_stream = graph.astream(
             {"messages": [("user", question)]},
             stream_mode="messages",
         )
