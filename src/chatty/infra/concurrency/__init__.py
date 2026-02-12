@@ -1,31 +1,34 @@
-"""Concurrency gate for LLM agent runs.
+"""Concurrency primitives for LLM agent runs.
 
-One gate, two layers inside:
+Two independent layers:
 
-1. **Inbox counter** (bounded by ``inbox_max_size``): admission control.
+1. **Inbox** (bounded by ``inbox_max_size``): admission control.
    Atomic increment on enter, decrement on leave.  If already at capacity
-   the request is rejected immediately (``GateFull``).
+   the request is rejected immediately (``InboxFull``).
 
-2. **Semaphore** (``max_concurrency`` slots): controls how many admitted
-   requests actively run the LLM agent.  Requests wait on the semaphore
-   after being admitted.
+2. **ModelSemaphore** (``max_concurrency`` slots): controls how many LLM
+   invocations run concurrently.  Wrapped around the chat model via
+   ``GatedChatModel`` so every ``_agenerate`` / ``_astream`` call is
+   individually gated.
 
-Two concrete backends are provided:
+Two concrete backends are provided for each layer:
 
-* ``RedisConcurrencyBackend`` – distributed, uses Lua scripts for
-  atomicity and Pub/Sub for event-driven slot notification.
-  Keys carry a TTL for crash-safety.
-* ``LocalConcurrencyBackend`` – in-process, backed by ``asyncio``
-  primitives.  Used automatically when Redis is unavailable.
+* Redis — distributed, uses Lua scripts for atomicity and Pub/Sub for
+  event-driven slot notification.  Keys carry a TTL for crash-safety.
+* Local — in-process, backed by ``asyncio`` primitives.  Used
+  automatically when Redis is unavailable.
 """
 
-from .base import ClientDisconnected, GateFull
-from .gate import ConcurrencyGate, DisconnectCheck, get_concurrency_gate
+from .base import AcquireTimeout, ClientDisconnected, InboxFull
+from .inbox import Inbox, get_inbox
+from .semaphore import ModelSemaphore, get_model_semaphore
 
 __all__ = [
+    "AcquireTimeout",
     "ClientDisconnected",
-    "ConcurrencyGate",
-    "DisconnectCheck",
-    "GateFull",
-    "get_concurrency_gate",
+    "Inbox",
+    "InboxFull",
+    "ModelSemaphore",
+    "get_inbox",
+    "get_model_semaphore",
 ]

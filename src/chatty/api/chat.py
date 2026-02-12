@@ -1,33 +1,34 @@
 """Chat API endpoint implementation."""
 
-import asyncio
 import logging
-from collections.abc import Awaitable, Callable
-from datetime import timedelta
-from typing import Annotated, AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from chatty.configs.config import get_app_config
-from chatty.configs.system import APIConfig
+from chatty.configs.system import APIConfig, ChatConfig
 from chatty.core.service import (
     ChatService,
     get_chat_service,
 )
-from chatty.core.service.models import DequeuedEvent, ErrorEvent, QueuedEvent
+from chatty.core.service.models import (
+    ChatContext,
+    DequeuedEvent,
+    QueuedEvent,
+    StreamEvent,
+)
 from chatty.infra.concurrency import (
-    ClientDisconnected,
-    ConcurrencyGate,
-    GateFull,
-    get_concurrency_gate,
+    InboxFull,
+    get_inbox,
 )
+from chatty.infra.db import load_conversation_history
+from chatty.infra.id_utils import generate_id
+from chatty.infra.telemetry import get_current_trace_id
 
-from .models import (
-    ChatRequest,
-    format_error_sse,
-    format_sse,
-)
+from .models import ChatRequest
+from .streaming import sse_stream
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,8 @@ STREAMING_RESPONSE_MEDIA_TYPE = "text/plain"
 STREAMING_RESPONSE_HEADERS = {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
-    "Access-Control-Allow-Headers": "Cache-Control",
+    "Access-Control-Allow-Headers": "Cache-Control, X-Chatty-Trace, X-Chatty-Conversation",
+    "Access-Control-Expose-Headers": "X-Chatty-Trace, X-Chatty-Conversation",
 }
 
 router = APIRouter(tags=["chat"])
@@ -45,71 +47,44 @@ def _get_api_config() -> APIConfig:
     return get_app_config().api
 
 
-async def _stream_chat_response(
-    chat_request: ChatRequest,
+def _get_chat_config() -> ChatConfig:
+    return get_app_config().chat
+
+
+# ---------------------------------------------------------------------------
+# Business-logic generator — pure domain events, no SSE formatting
+# ---------------------------------------------------------------------------
+
+
+async def _chat_events(
+    ctx: ChatContext,
     service: ChatService,
-    gate: ConcurrencyGate,
     position: int,
     is_disconnected: Callable[[], Awaitable[bool]],
-    request_timeout: timedelta,
-) -> AsyncGenerator[str, None]:
-    """Stream agent events as SSE, gated by the concurrency semaphore.
+) -> AsyncGenerator[StreamEvent, None]:
+    """Yield domain events for a single chat request.
 
-    The caller has already admitted the request into the inbox (position
-    is known).  This generator:
+    1. ``QueuedEvent`` — client knows it is waiting.
+    2. ``DequeuedEvent`` — request admitted, agent starting.
+    3. Delegate to ``service.stream_response()``, checking for
+       client disconnect between each event.
 
-    1. Yields ``QueuedEvent`` to notify the client.
-    2. Acquires a concurrency slot via ``gate.slot()``.  If the
-       configured ``acquire_timeout`` is exceeded, yields an error
-       event with type ``TOO_MANY_REQUESTS`` and closes the stream.
-    3. Yields ``DequeuedEvent`` once the slot is acquired.
-    4. Delegates to ``service.stream_response()``, checking for
-       client disconnect between each streamed event.
-    5. Always releases the slot (if held) and leaves the inbox.
-
-    The entire flow is wrapped in ``asyncio.timeout()`` so requests
-    that exceed ``request_timeout`` are cancelled with an error event.
+    Concurrency gating on the LLM is handled transparently by
+    ``GatedChatModel`` — there is no semaphore logic here.
     """
-    try:
-        async with asyncio.timeout(request_timeout.total_seconds()):
-            # 1. Notify client it is queued.
-            yield format_sse(QueuedEvent(position=position))
+    yield QueuedEvent(position=position)
+    yield DequeuedEvent()
 
-            # 2-3. Acquire a concurrency slot (disconnect-aware, with timeout).
-            async with gate.slot(disconnected=is_disconnected):
-                yield format_sse(DequeuedEvent())
+    async for event in service.stream_response(ctx):
+        if await is_disconnected():
+            logger.debug("Client disconnected during streaming.")
+            return
+        yield event
 
-                # 4. Stream the actual agent response.
-                async for event in service.stream_response(
-                    chat_request.query
-                ):
-                    if await is_disconnected():
-                        logger.debug("Client disconnected during streaming.")
-                        return
-                    yield format_sse(event)
 
-    except GateFull:
-        logger.warning("Acquire timeout — no concurrency slot available.")
-        yield format_sse(
-            ErrorEvent(
-                message="Too many requests in flight. Try again later.",
-                code="TOO_MANY_REQUESTS",
-            )
-        )
-    except TimeoutError:
-        logger.warning("Request timed out after %s.", request_timeout)
-        yield format_sse(
-            ErrorEvent(message="Request timed out.", code="REQUEST_TIMEOUT")
-        )
-    except ClientDisconnected:
-        logger.debug("Client disconnected while waiting for slot.")
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        yield format_error_sse(e)
-    finally:
-        # 5. Always leave the inbox.
-        await gate.leave()
+# ---------------------------------------------------------------------------
+# Endpoint
+# ---------------------------------------------------------------------------
 
 
 @router.post("/chat")
@@ -118,42 +93,71 @@ async def chat(
     chat_request: ChatRequest,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
     api_config: Annotated[APIConfig, Depends(_get_api_config)],
+    chat_config: Annotated[ChatConfig, Depends(_get_chat_config)],
 ) -> StreamingResponse | JSONResponse:
     """Process a chat request and return a streaming response.
+
+    Supports two modes (ChatGPT-style):
+
+    - **New conversation**: omit ``conversation_id`` — a fresh ID is
+      generated and returned in the ``X-Chatty-Conversation`` header.
+    - **Continue conversation**: pass an existing ``conversation_id`` —
+      the server loads recent history from the DB (up to
+      ``max_conversation_length``) before invoking the agent.
 
     The response is a stream of Server-Sent Events, where each event
     is a JSON object with a ``type`` discriminator:
 
-    - **queued**: request admitted into the concurrency gate
-    - **dequeued**: concurrency slot acquired, agent starting
-    - **thinking**: agent internal reasoning
-    - **content**: user-facing streamed text tokens
-    - **tool_call**: tool invocation lifecycle (started / completed / error)
-    - **error**: stream-level error (including ``TOO_MANY_REQUESTS``,
-      ``REQUEST_TIMEOUT``)
+    - **queued** / **dequeued** — concurrency lifecycle
+    - **thinking** / **content** / **tool_call** — agent output
+    - **error** — stream-level error
 
-    Returns **429** when the concurrency gate inbox is full.
+    Infrastructure IDs are returned via response headers:
+
+    - ``X-Chatty-Trace`` — trace ID for debugging
+    - ``X-Chatty-Conversation`` — conversation ID for follow-up turns
+
+    Returns **429** when the inbox is full.
     """
-    gate = get_concurrency_gate()
+    inbox = get_inbox()
 
     # Admission control — reject early with a proper HTTP status code.
     try:
-        position = await gate.enter()
-    except GateFull:
+        position = await inbox.enter()
+    except InboxFull:
         return JSONResponse(
             status_code=429,
             content={"detail": "Too many requests in flight. Try again later."},
         )
 
+    # --- Resolve conversation ID ---
+    conversation_id = chat_request.conversation_id or generate_id("conv")
+    trace_id = get_current_trace_id() or generate_id("trace")
+
+    # --- Load history for continuing conversations ---
+    history = []
+    if chat_request.conversation_id:
+        history = await load_conversation_history(
+            conversation_id, max_messages=chat_config.max_conversation_length
+        )
+
+    ctx = ChatContext(
+        query=chat_request.query,
+        conversation_id=conversation_id,
+        trace_id=trace_id,
+        history=history,
+    )
+
     return StreamingResponse(
-        _stream_chat_response(
-            chat_request,
-            chat_service,
-            gate,
-            position,
-            is_disconnected=request.is_disconnected,
+        sse_stream(
+            _chat_events(ctx, chat_service, position, request.is_disconnected),
             request_timeout=api_config.request_timeout,
+            on_finish=inbox.leave,
         ),
         media_type=STREAMING_RESPONSE_MEDIA_TYPE,
-        headers=STREAMING_RESPONSE_HEADERS,
+        headers={
+            **STREAMING_RESPONSE_HEADERS,
+            "X-Chatty-Trace": trace_id,
+            "X-Chatty-Conversation": conversation_id,
+        },
     )

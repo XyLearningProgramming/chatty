@@ -1,7 +1,6 @@
 """Pydantic models for the chat API."""
 
 from traceback import format_exc
-from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -11,25 +10,28 @@ from chatty.core.service.models import ErrorEvent, StreamEvent
 CHAT_QUERY_MAX_LENGTH = 1024
 
 # Re-export for the API layer
-__all__ = ["ChatMessage", "ChatRequest", "StreamEvent", "ErrorEvent"]
-
-
-class ChatMessage(BaseModel):
-    """A single message in the conversation."""
-
-    role: Literal["user", "assistant"] = Field(description="Message sender role")
-    content: str = Field(description="Message content")
+__all__ = ["ChatRequest", "StreamEvent", "ErrorEvent"]
 
 
 class ChatRequest(BaseModel):
-    """Request model for the chat endpoint."""
+    """Request model for the chat endpoint.
+
+    Two modes of operation (ChatGPT-style):
+
+    - **New conversation**: omit ``conversation_id`` — the server
+      generates one and returns it in the ``X-Chatty-Conversation``
+      response header.
+    - **Continue conversation**: pass the ``conversation_id`` received
+      from a previous turn — the server loads history from the DB.
+    """
 
     query: str = Field(
         description="User query to process", max_length=CHAT_QUERY_MAX_LENGTH
     )
-    conversation_history: list[ChatMessage] = Field(
-        default_factory=list,
-        description="Previous conversation messages for context",
+    conversation_id: str | None = Field(
+        default=None,
+        description="Existing conversation ID for follow-up turns. "
+        "Omit to start a new conversation.",
     )
 
 

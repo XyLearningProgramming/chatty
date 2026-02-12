@@ -9,8 +9,10 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from chatty.api.chat import router as chat_router
 from chatty.configs.config import get_app_config
-from chatty.infra.concurrency import get_concurrency_gate
+from chatty.infra.concurrency.inbox import get_inbox
+from chatty.infra.concurrency.semaphore import get_model_semaphore
 from chatty.infra.redis import get_redis_client
+from chatty.infra.telemetry import init_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +31,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("Redis unavailable — falling back to local concurrency backend.")
 
-    # Concurrency gate singleton — first call initialises it.
-    get_concurrency_gate(redis_client)
+    # Concurrency singletons — first call initialises each.
+    get_inbox(redis_client)
+    get_model_semaphore(redis_client)
 
     # TODO: Initialize database connections
     # TODO: Initialize model server connections
@@ -39,7 +42,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown logic
     logger.info("Shutting down Chatty application...")
-    await get_concurrency_gate().aclose()
+    await get_inbox().aclose()
+    await get_model_semaphore().aclose()
     if redis_client is not None:
         await redis_client.aclose()
 
@@ -82,6 +86,9 @@ def get_app() -> FastAPI:
     app.include_router(chat_router, prefix=api_prefix)
 
     app.get("/health")(lambda: "ok")
+
+    # OpenTelemetry — instruments FastAPI + httpx; no-op if OTEL env vars absent.
+    init_telemetry(app)
 
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 

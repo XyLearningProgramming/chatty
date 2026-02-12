@@ -1,4 +1,4 @@
-"""Distributed concurrency backend backed by Redis Lua scripts + Pub/Sub."""
+"""Distributed concurrency backends backed by Redis Lua scripts + Pub/Sub."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from datetime import timedelta
 
 from redis.asyncio import Redis
 
-from .base import ConcurrencyBackend, GateFull
+from .base import AcquireTimeout, InboxBackend, InboxFull, SemaphoreBackend
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Lua scripts
+# Lua scripts — inbox
 # ---------------------------------------------------------------------------
 
 # Atomically increment inbox counter if below max.
@@ -43,6 +43,10 @@ if cur > 0 then
 end
 return 0
 """
+
+# ---------------------------------------------------------------------------
+# Lua scripts — semaphore
+# ---------------------------------------------------------------------------
 
 # Atomically try to acquire a semaphore slot.
 # KEYS[1] = slots key, ARGV[1] = max concurrency, ARGV[2] = TTL.
@@ -78,67 +82,32 @@ return 0
 
 
 # ---------------------------------------------------------------------------
-# Backend
+# Inbox backend
 # ---------------------------------------------------------------------------
 
 
-class RedisConcurrencyBackend(ConcurrencyBackend):
-    """Distributed concurrency backend backed by Redis Lua scripts + Pub/Sub.
-
-    The semaphore acquire waits for a Pub/Sub notification from
-    ``release()`` instead of polling, giving instant wake-up with zero
-    busy-looping.
-    """
+class RedisInboxBackend(InboxBackend):
+    """Distributed inbox counter backed by a Redis Lua script."""
 
     def __init__(
         self,
         redis: Redis,
         inbox_key: str,
-        slots_key: str,
-        notify_channel: str,
-        max_concurrency: int,
         inbox_max_size: int,
         ttl: timedelta,
-        acquire_timeout: timedelta,
     ) -> None:
         self._redis = redis
         self._inbox_key = inbox_key
-        self._slots_key = slots_key
-        self._notify_channel = notify_channel
-        self._max_concurrency = max_concurrency
         self._inbox_max_size = inbox_max_size
         self._ttl_seconds = int(ttl.total_seconds())
-        self._acquire_timeout = acquire_timeout.total_seconds()
 
-        # Pre-register Lua scripts.
         self._enter_sha: str | None = None
         self._leave_sha: str | None = None
-        self._acquire_sha: str | None = None
-        self._release_sha: str | None = None
-
-    # -- lazy script registration ------------------------------------------
 
     async def _ensure_scripts(self) -> None:
         if self._enter_sha is None:
             self._enter_sha = await self._redis.script_load(_LUA_ENTER)
             self._leave_sha = await self._redis.script_load(_LUA_LEAVE)
-            self._acquire_sha = await self._redis.script_load(_LUA_ACQUIRE)
-            self._release_sha = await self._redis.script_load(_LUA_RELEASE)
-
-    # -- helpers -----------------------------------------------------------
-
-    async def _try_acquire(self) -> bool:
-        """Attempt to claim a semaphore slot (non-blocking)."""
-        result = await self._redis.evalsha(
-            self._acquire_sha,  # type: ignore[arg-type]
-            1,
-            self._slots_key,
-            str(self._max_concurrency),
-            str(self._ttl_seconds),
-        )
-        return int(result) == 1
-
-    # -- public API --------------------------------------------------------
 
     async def enter(self) -> int:
         await self._ensure_scripts()
@@ -151,11 +120,73 @@ class RedisConcurrencyBackend(ConcurrencyBackend):
         )
         count = int(result)
         if count == -1:
-            raise GateFull(
+            raise InboxFull(
                 f"Inbox full ({self._inbox_max_size}): "
                 "too many requests in flight."
             )
         return count
+
+    async def leave(self) -> None:
+        await self._ensure_scripts()
+        await self._redis.evalsha(
+            self._leave_sha,  # type: ignore[arg-type]
+            1,
+            self._inbox_key,
+            str(self._ttl_seconds),
+        )
+
+    async def aclose(self) -> None:
+        # Redis client lifecycle is managed externally (infra/redis.py).
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Semaphore backend
+# ---------------------------------------------------------------------------
+
+
+class RedisSemaphoreBackend(SemaphoreBackend):
+    """Distributed semaphore backed by Redis Lua scripts + Pub/Sub.
+
+    The ``acquire`` method waits for a Pub/Sub notification from
+    ``release()`` instead of polling, giving instant wake-up with zero
+    busy-looping.
+    """
+
+    def __init__(
+        self,
+        redis: Redis,
+        slots_key: str,
+        notify_channel: str,
+        max_concurrency: int,
+        ttl: timedelta,
+        acquire_timeout: timedelta,
+    ) -> None:
+        self._redis = redis
+        self._slots_key = slots_key
+        self._notify_channel = notify_channel
+        self._max_concurrency = max_concurrency
+        self._ttl_seconds = int(ttl.total_seconds())
+        self._acquire_timeout = acquire_timeout.total_seconds()
+
+        self._acquire_sha: str | None = None
+        self._release_sha: str | None = None
+
+    async def _ensure_scripts(self) -> None:
+        if self._acquire_sha is None:
+            self._acquire_sha = await self._redis.script_load(_LUA_ACQUIRE)
+            self._release_sha = await self._redis.script_load(_LUA_RELEASE)
+
+    async def _try_acquire(self) -> bool:
+        """Attempt to claim a semaphore slot (non-blocking)."""
+        result = await self._redis.evalsha(
+            self._acquire_sha,  # type: ignore[arg-type]
+            1,
+            self._slots_key,
+            str(self._max_concurrency),
+            str(self._ttl_seconds),
+        )
+        return int(result) == 1
 
     async def acquire(self) -> None:
         await self._ensure_scripts()
@@ -177,7 +208,7 @@ class RedisConcurrencyBackend(ConcurrencyBackend):
 
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise GateFull(
+                    raise AcquireTimeout(
                         "Timed out waiting for a concurrency slot. "
                         "Try again later."
                     )
@@ -199,15 +230,6 @@ class RedisConcurrencyBackend(ConcurrencyBackend):
             2,
             self._slots_key,
             self._notify_channel,
-            str(self._ttl_seconds),
-        )
-
-    async def leave(self) -> None:
-        await self._ensure_scripts()
-        await self._redis.evalsha(
-            self._leave_sha,  # type: ignore[arg-type]
-            1,
-            self._inbox_key,
             str(self._ttl_seconds),
         )
 

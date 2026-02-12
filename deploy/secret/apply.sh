@@ -4,12 +4,13 @@ set -euo pipefail
 
 # Script to apply Kubernetes secrets from env file
 # Usage: ./apply.sh [env-file-path]
-# Defaults to ./chatty.env if no file specified
+# Defaults to ./.env if no file specified
+# See .env.example at the project root for all available variables.
 
 if [ $# -eq 0 ]; then
     # Get the directory of this script
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    ENV_FILE="$SCRIPT_DIR/chatty.env"
+    ENV_FILE="$SCRIPT_DIR/.env"
 elif [ $# -eq 1 ]; then
     ENV_FILE="$1"
 else

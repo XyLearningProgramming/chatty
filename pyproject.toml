@@ -17,6 +17,12 @@ dependencies = [
     "redis>=5.0.0",
     "pymupdf>=1.25.3",
     "uvicorn>=0.35.0",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp>=1.20",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
+    "opentelemetry-instrumentation-httpx>=0.41b0",
 ]
 
 [tool.ruff.lint]
