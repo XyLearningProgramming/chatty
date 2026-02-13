@@ -19,8 +19,9 @@ after startup requires a process restart.
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
+import yaml
 from pydantic import Field
 from pydantic_settings import (
     BaseSettings,
@@ -35,10 +36,12 @@ from .system import (
     CacheConfig,
     ChatConfig,
     ConcurrencyConfig,
+    EmbeddingConfig,
     LLMConfig,
+    PromptConfig,
+    RagConfig,
     ThirdPartyConfig,
 )
-from .tools import ToolConfig
 
 # ---------------------------------------------------------------------------
 # Path constants
@@ -50,6 +53,9 @@ CONFIG_DIR = PROJECT_ROOT / "configs"
 
 # Single known config file (baked into the Docker image).
 STATIC_CONFIG_FILE = CONFIG_DIR / "config.yaml"
+
+# Prompt configuration file
+PROMPT_CONFIG_FILE = CONFIG_DIR / "prompt.yml"
 
 # Optional ConfigMap override file.  The Helm chart injects the env var
 # ``CHATTY_CONFIGMAP_FILE`` pointing to the mounted config file when a
@@ -115,12 +121,22 @@ class AppConfig(BaseSettings):
 
     persona: PersonaConfig = Field(
         default_factory=PersonaConfig,
-        description="Author persona configuration",
+        description="Author persona configuration (identity + knowledge)",
     )
 
-    tools: list[ToolConfig] = Field(
-        default_factory=list,
-        description="Agent tool definitions (top-level, shared)",
+    embedding: EmbeddingConfig = Field(
+        default_factory=EmbeddingConfig,
+        description="OpenAI-compatible embedding endpoint settings",
+    )
+
+    rag: RagConfig = Field(
+        default_factory=RagConfig,
+        description="RAG retrieval settings",
+    )
+
+    prompt: PromptConfig = Field(
+        default_factory=PromptConfig,
+        description="System prompt configuration",
     )
 
     @classmethod
@@ -150,11 +166,36 @@ class AppConfig(BaseSettings):
         # 4. Static YAML (baked into image)
         sources.append(YamlConfigSettingsSource(settings_cls))
 
+        # 4.5. Prompt YAML (separate file)
+        sources.append(_PromptYamlSettingsSource(settings_cls))
+
         # 5-6. Init defaults and file secrets
         sources.append(init_settings)
         sources.append(file_secret_settings)
 
         return tuple(sources)
+
+
+class _PromptYamlSettingsSource(PydanticBaseSettingsSource):
+    """Custom settings source that loads prompt.yml file."""
+
+    def __init__(self, settings_cls: type[BaseSettings]) -> None:
+        self.settings_cls = settings_cls
+
+    def __call__(self) -> dict[str, Any]:
+        """Load prompt config from prompt.yml file."""
+        if not PROMPT_CONFIG_FILE.exists():
+            return {}
+
+        try:
+            with open(PROMPT_CONFIG_FILE, encoding=DEFUALT_ENCODING) as f:
+                data = yaml.safe_load(f)
+                if data and "system_prompt" in data:
+                    return {"prompt": {"system_prompt": data["system_prompt"]}}
+        except Exception:
+            pass
+
+        return {}
 
 
 def get_app_config() -> AppConfig:

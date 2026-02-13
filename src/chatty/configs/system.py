@@ -127,3 +127,51 @@ class ChatConfig(BaseModel):
         description="Per-tool execution timeout. Applied to every tool "
         "invocation (fetch + post-processing).",
     )
+
+
+class EmbeddingConfig(BaseModel):
+    """Configuration for the OpenAI-compatible embedding endpoint."""
+
+    endpoint: str = Field(
+        default="http://localhost:8000/api/v1/",
+        description="OpenAI-compatible /embeddings base URL",
+    )
+    api_key: str = Field(
+        default="",
+        description="API key for the embedding service",
+    )
+    model_name: str = Field(
+        default="text-embedding-ada-002",
+        description="Embedding model name",
+    )
+    dimensions: int = Field(
+        default=1536,
+        description="Embedding vector dimensionality",
+    )
+
+
+class RagConfig(BaseModel):
+    """RAG retrieval settings."""
+
+    top_k: int = Field(
+        default=3,
+        description="Number of top sections to retrieve",
+    )
+    similarity_threshold: float = Field(
+        default=0.7,
+        description="Minimum cosine similarity to include a section",
+    )
+    cron_interval: int = Field(
+        default=30,
+        description="Seconds between embedding cron ticks",
+    )
+
+
+class PromptConfig(BaseModel):
+    """System prompt configuration."""
+
+    system_prompt: str = Field(
+        default="",
+        description="Jinja2 template for system prompt with variables: "
+        "persona_name, persona_character, persona_expertise",
+    )

@@ -7,7 +7,7 @@ auto-generated migrations.
 
 from typing import Any, Literal
 
-from sqlalchemy import BigInteger, DateTime, Index, String, func
+from sqlalchemy import BigInteger, DateTime, Index, String, TypeDecorator, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from typing_extensions import NotRequired, TypedDict
@@ -192,4 +192,116 @@ class ChatMessage(Base):
         return (
             f"<ChatMessage(id={self.id}, conversation_id={self.conversation_id!r}, "
             f"trace_id={self.trace_id!r}, role={self.role!r})>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# pgvector support
+# ---------------------------------------------------------------------------
+
+# Default embedding dimensions (text-embedding-ada-002)
+EMBEDDING_DIMENSIONS = 1536
+
+
+class Vector(TypeDecorator):
+    """SQLAlchemy type for pgvector vector column.
+
+    Stores and retrieves vectors as lists of floats. The underlying
+    database type is ``vector(dimensions)`` from the pgvector extension.
+    """
+
+    impl = String
+    cache_ok = True
+
+    def __init__(self, dimensions: int = EMBEDDING_DIMENSIONS):
+        super().__init__()
+        self.dimensions = dimensions
+
+    def load_dialect_impl(self, dialect):
+        # Return a type that will be handled as text in SQLAlchemy
+        # but we'll use raw SQL for actual vector operations
+        return dialect.type_descriptor(String)
+
+    def process_bind_param(self, value, dialect):
+        """Convert list[float] to PostgreSQL vector string format."""
+        if value is None:
+            return None
+        if isinstance(value, list):
+            # Format as PostgreSQL array literal: '{0.1,0.2,...}'
+            # This format works for casting to vector type
+            return "{" + ",".join(str(float(x)) for x in value) + "}"
+        return value
+
+    def process_result_value(self, value, dialect):
+        """Convert PostgreSQL vector to list[float].
+
+        asyncpg returns vector types as lists directly, but we handle
+        both list and string formats for safety.
+        """
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            # Parse string format '[0.1,0.2,...]'
+            return [float(x.strip()) for x in value.strip("[]").split(",")]
+        return value
+
+
+# ---------------------------------------------------------------------------
+# Text embeddings table (embedding cache)
+# ---------------------------------------------------------------------------
+
+
+class TextEmbedding(Base):
+    """Cached text embedding vector.
+
+    Stores the SHA-256 hash of the input text alongside the embedding
+    vector (as a pgvector vector type) and the model name that produced it.
+    The ``(text_hash, model_name)`` pair is unique so that the same text
+    can have embeddings from different models.
+    """
+
+    __tablename__ = "text_embeddings"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+    text_hash: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    text_content: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(EMBEDDING_DIMENSIONS),
+        nullable=False,
+    )
+    model_name: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    created_at: Mapped[str] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_text_embeddings_text_hash_model_name",
+            "text_hash",
+            "model_name",
+            unique=True,
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<TextEmbedding(id={self.id}, text_hash={self.text_hash!r}, "
+            f"model_name={self.model_name!r})>"
         )

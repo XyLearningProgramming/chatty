@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -9,6 +10,8 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from chatty.api.chat import router as chat_router
 from chatty.configs.config import get_app_config
+from chatty.core.embedding.cron import embedding_cron_loop
+from chatty.core.service.dependency import get_embedding_client
 from chatty.infra.concurrency.inbox import get_inbox
 from chatty.infra.concurrency.semaphore import get_model_semaphore
 from chatty.infra.redis import get_redis_client
@@ -23,25 +26,42 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup logic
     logger.info("Starting Chatty application...")
 
-    # Redis — tolerant of failure (None → local fallback).
+    # Redis -- tolerant of failure (None -> local fallback).
     redis_client = None
     try:
         redis_client = get_redis_client()
         await redis_client.ping()
     except Exception:
-        logger.warning("Redis unavailable — falling back to local concurrency backend.")
+        logger.warning("Redis unavailable -- falling back to local concurrency backend.")
 
-    # Concurrency singletons — first call initialises each.
+    # Concurrency singletons -- first call initialises each.
     get_inbox(redis_client)
     get_model_semaphore(redis_client)
 
-    # TODO: Initialize database connections
-    # TODO: Initialize model server connections
+    # Embedding cron -- pre-embeds persona sections during idle time.
+    cron_task: asyncio.Task | None = None
+    config = get_app_config()
+    if config.chat.agent_name == "rag":
+        embedding_client = get_embedding_client()
+        cron_task = asyncio.create_task(
+            embedding_cron_loop(embedding_client),
+            name="embedding-cron",
+        )
+        logger.info("Embedding cron started (interval=%ds)", config.rag.cron_interval)
 
     yield
 
     # Shutdown logic
     logger.info("Shutting down Chatty application...")
+
+    if cron_task is not None:
+        cron_task.cancel()
+        try:
+            await cron_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Embedding cron stopped.")
+
     await get_inbox().aclose()
     await get_model_semaphore().aclose()
     if redis_client is not None:

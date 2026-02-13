@@ -1,11 +1,11 @@
-"""Unit tests for ToolConfig, URLDispatcherTool, and ToolRegistry."""
+"""Unit tests for KnowledgeSection, URLDispatcherTool, and ToolRegistry."""
 
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from chatty.configs.tools import ToolConfig
+from chatty.configs.persona import KnowledgeSection
 from chatty.core.service.tools.processors import HtmlHeadTitleMeta
 from chatty.core.service.tools.registry import ToolRegistry
 from chatty.core.service.tools.url_tool import (
@@ -14,45 +14,39 @@ from chatty.core.service.tools.url_tool import (
 )
 
 # ---------------------------------------------------------------------------
-# ToolConfig
+# KnowledgeSection
 # ---------------------------------------------------------------------------
 
 
-class TestToolConfig:
-    """Test the Pydantic tool config model."""
+class TestKnowledgeSection:
+    """Test the Pydantic knowledge section model."""
 
-    def test_minimal_config(self):
-        cfg = ToolConfig(
-            name="my_tool",
-            description="A tool",
-            tool_type="url",
-        )
-        assert cfg.name == "my_tool"
-        assert cfg.description == "A tool"
-        assert cfg.tool_type == "url"
-        assert cfg.args == {}
-        assert cfg.processors == []
+    def test_minimal_section(self):
+        section = KnowledgeSection(title="my_section")
+        assert section.title == "my_section"
+        assert section.description == ""
+        assert section.content == ""
+        assert section.source_url == ""
+        assert section.args == {}
+        assert section.processors == []
 
-    def test_full_config(self):
-        cfg = ToolConfig(
-            name="homepage",
+    def test_full_section(self):
+        section = KnowledgeSection(
+            title="homepage",
             description="Fetch homepage",
-            tool_type="url",
-            args={"url": "https://example.com", "timeout": 10},
+            source_url="https://example.com",
+            args={"timeout": 10},
             processors=["html_head_title_meta"],
         )
-        assert cfg.args["url"] == "https://example.com"
-        assert cfg.args["timeout"] == 10
-        assert cfg.processors == ["html_head_title_meta"]
+        assert section.source_url == "https://example.com"
+        assert section.args["timeout"] == 10
+        assert section.processors == ["html_head_title_meta"]
 
     def test_missing_required_fields(self):
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            ToolConfig()  # type: ignore[call-arg]
-
-        with pytest.raises(ValidationError):
-            ToolConfig(name="x", description="y")  # type: ignore[call-arg]
+            KnowledgeSection()  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -60,114 +54,101 @@ class TestToolConfig:
 # ---------------------------------------------------------------------------
 
 
-class TestURLDispatcherFromConfigs:
-    """Test building the dispatcher from a list of ToolConfigs."""
+class TestURLDispatcherFromSections:
+    """Test building the dispatcher from a list of KnowledgeSections."""
 
-    def test_basic_from_configs(self):
-        configs = [
-            ToolConfig(
-                name="homepage",
+    def test_basic_from_sections(self):
+        sections = [
+            KnowledgeSection(
+                title="homepage",
                 description="Get homepage",
-                tool_type="url",
-                args={"url": "https://example.com"},
+                source_url="https://example.com",
             ),
-            ToolConfig(
-                name="resume",
+            KnowledgeSection(
+                title="resume",
                 description="Get resume",
-                tool_type="url",
-                args={"url": "https://example.com/resume"},
+                source_url="https://example.com/resume",
             ),
         ]
-        tool = URLDispatcherTool.from_configs(configs)
+        tool = URLDispatcherTool.from_sections(sections)
         assert tool.name == "lookup"
         assert set(tool.routes.keys()) == {"homepage", "resume"}
         assert tool.routes["homepage"].args.url == "https://example.com"
         assert tool.routes["resume"].args.url == "https://example.com/resume"
 
-    def test_single_config(self):
-        configs = [
-            ToolConfig(
-                name="homepage",
+    def test_single_section(self):
+        sections = [
+            KnowledgeSection(
+                title="homepage",
                 description="Get homepage",
-                tool_type="url",
-                args={"url": "https://example.com"},
+                source_url="https://example.com",
             ),
         ]
-        tool = URLDispatcherTool.from_configs(configs)
+        tool = URLDispatcherTool.from_sections(sections)
         assert tool.name == "lookup"
         assert set(tool.routes.keys()) == {"homepage"}
 
     def test_custom_timeout_and_max_length(self):
-        configs = [
-            ToolConfig(
-                name="resume",
+        sections = [
+            KnowledgeSection(
+                title="resume",
                 description="Get resume",
-                tool_type="url",
-                args={
-                    "url": "https://example.com/resume",
-                    "timeout": 5,
-                    "max_content_length": 500,
-                },
+                source_url="https://example.com/resume",
+                args={"timeout": 5, "max_content_length": 500},
             ),
         ]
-        tool = URLDispatcherTool.from_configs(configs)
+        tool = URLDispatcherTool.from_sections(sections)
         route = tool.routes["resume"]
         assert route.args.timeout == timedelta(seconds=5)
         assert route.args.max_content_length == 500
 
     def test_missing_url_defaults_to_empty(self):
-        configs = [
-            ToolConfig(
-                name="empty",
+        sections = [
+            KnowledgeSection(
+                title="empty",
                 description="No URL",
-                tool_type="url",
-                args={},
             ),
         ]
-        tool = URLDispatcherTool.from_configs(configs)
+        tool = URLDispatcherTool.from_sections(sections)
         assert tool.routes["empty"].args.url == ""
 
     def test_tool_type_attribute(self):
         assert URLDispatcherTool.tool_type == "url"
 
     def test_processors_stored_per_route(self):
-        configs = [
-            ToolConfig(
-                name="homepage",
+        sections = [
+            KnowledgeSection(
+                title="homepage",
                 description="d",
-                tool_type="url",
-                args={"url": "http://x"},
+                source_url="http://x",
             ),
-            ToolConfig(
-                name="resume",
+            KnowledgeSection(
+                title="resume",
                 description="d",
-                tool_type="url",
-                args={"url": "http://y"},
+                source_url="http://y",
             ),
         ]
         processor = HtmlHeadTitleMeta()
-        tool = URLDispatcherTool.from_configs(
-            configs, processors={"homepage": [processor]}
+        tool = URLDispatcherTool.from_sections(
+            sections, processors={"homepage": [processor]}
         )
         assert len(tool.routes["homepage"].processors) == 1
         assert len(tool.routes["resume"].processors) == 0
 
     def test_args_schema_has_enum_and_descriptions(self):
-        configs = [
-            ToolConfig(
-                name="homepage",
+        sections = [
+            KnowledgeSection(
+                title="homepage",
                 description="Personal website meta info",
-                tool_type="url",
-                args={"url": "http://x"},
+                source_url="http://x",
             ),
-            ToolConfig(
-                name="resume",
+            KnowledgeSection(
+                title="resume",
                 description="Full resume PDF content",
-                tool_type="url",
-                args={"url": "http://y"},
+                source_url="http://y",
             ),
         ]
-        tool = URLDispatcherTool.from_configs(configs)
+        tool = URLDispatcherTool.from_sections(sections)
         schema = tool.args_schema.model_json_schema()
         source_schema = schema["properties"]["source"]
         # Enum lists valid values
@@ -228,15 +209,15 @@ class TestURLDispatcherArun:
 
     @pytest.mark.asyncio
     async def test_arun_dispatches_by_name(self):
-        configs = [
-            ToolConfig(
-                name="homepage",
+        sections = [
+            KnowledgeSection(
+                title="homepage",
                 description="d",
-                tool_type="url",
-                args={"url": "https://example.com", "max_content_length": 200},
+                source_url="https://example.com",
+                args={"max_content_length": 200},
             ),
         ]
-        tool = URLDispatcherTool.from_configs(configs)
+        tool = URLDispatcherTool.from_sections(sections)
 
         mock_response = _html_response(
             "<html><head><title>Hi</title></head></html>"
@@ -256,15 +237,15 @@ class TestURLDispatcherArun:
 
     @pytest.mark.asyncio
     async def test_arun_truncates_large_response(self):
-        configs = [
-            ToolConfig(
-                name="big",
+        sections = [
+            KnowledgeSection(
+                title="big",
                 description="d",
-                tool_type="url",
-                args={"url": "https://example.com", "max_content_length": 10},
+                source_url="https://example.com",
+                args={"max_content_length": 10},
             ),
         ]
-        tool = URLDispatcherTool.from_configs(configs)
+        tool = URLDispatcherTool.from_sections(sections)
 
         mock_response = _html_response("x" * 100)
 
@@ -282,15 +263,14 @@ class TestURLDispatcherArun:
 
     @pytest.mark.asyncio
     async def test_arun_unknown_name_returns_error_message(self):
-        configs = [
-            ToolConfig(
-                name="homepage",
+        sections = [
+            KnowledgeSection(
+                title="homepage",
                 description="d",
-                tool_type="url",
-                args={"url": "http://x"},
+                source_url="http://x",
             ),
         ]
-        tool = URLDispatcherTool.from_configs(configs)
+        tool = URLDispatcherTool.from_sections(sections)
         result = await tool._arun(source="nonexistent")
         assert "Unknown source" in result
         assert "homepage" in result
@@ -334,18 +314,15 @@ class TestURLDispatcherPdf:
     @pytest.mark.asyncio
     async def test_arun_extracts_pdf_text(self):
         pdf_bytes = self._make_simple_pdf("Software Engineer")
-        configs = [
-            ToolConfig(
-                name="resume",
+        sections = [
+            KnowledgeSection(
+                title="resume",
                 description="d",
-                tool_type="url",
-                args={
-                    "url": "https://example.com/resume",
-                    "max_content_length": 5000,
-                },
+                source_url="https://example.com/resume",
+                args={"max_content_length": 5000},
             ),
         ]
-        tool = URLDispatcherTool.from_configs(configs)
+        tool = URLDispatcherTool.from_sections(sections)
 
         mock_response = _pdf_response(pdf_bytes)
 
@@ -369,65 +346,58 @@ class TestURLDispatcherPdf:
 class TestToolRegistry:
     """Test registry: grouping, error handling, and caching."""
 
-    def test_creates_dispatcher_from_configs(self):
-        configs = [
-            ToolConfig(
-                name="homepage",
+    def test_creates_dispatcher_from_sections(self):
+        sections = [
+            KnowledgeSection(
+                title="homepage",
                 description="Get homepage",
-                tool_type="url",
-                args={"url": "https://example.com"},
+                source_url="https://example.com",
             ),
-            ToolConfig(
-                name="resume",
+            KnowledgeSection(
+                title="resume",
                 description="Get resume",
-                tool_type="url",
-                args={"url": "https://example.com/resume"},
+                source_url="https://example.com/resume",
             ),
         ]
-        registry = ToolRegistry(configs)
+        registry = ToolRegistry(sections)
         tools = registry.get_tools()
-        # Two url configs → one dispatcher tool
+        # Two url sections -> one dispatcher tool
         assert len(tools) == 1
         assert tools[0].name == "lookup"
 
-    def test_empty_configs(self):
+    def test_empty_sections(self):
         registry = ToolRegistry([])
         assert registry.get_tools() == []
 
-    def test_unknown_tool_type_raises(self):
-        configs = [
-            ToolConfig(
-                name="bad",
-                description="Bad tool",
-                tool_type="nonexistent",
-            ),
+    def test_inline_only_sections_produce_no_tools(self):
+        """Sections without source_url should not produce tools."""
+        sections = [
+            KnowledgeSection(title="about", content="I am a dev"),
         ]
-        with pytest.raises(NotImplementedError, match="nonexistent"):
-            ToolRegistry(configs)
+        registry = ToolRegistry(sections)
+        assert registry.get_tools() == []
 
     def test_unknown_processor_raises(self):
-        configs = [
-            ToolConfig(
-                name="t",
+        sections = [
+            KnowledgeSection(
+                title="t",
                 description="d",
-                tool_type="url",
-                args={"url": "http://x"},
+                source_url="http://x",
                 processors=["does_not_exist"],
             ),
         ]
         with pytest.raises(NotImplementedError, match="does_not_exist"):
-            ToolRegistry(configs)
+            ToolRegistry(sections)
 
     def test_get_tools_returns_copy(self):
-        configs = [
-            ToolConfig(
-                name="t",
+        sections = [
+            KnowledgeSection(
+                title="t",
                 description="d",
-                tool_type="url",
-                args={"url": "http://x"},
+                source_url="http://x",
             ),
         ]
-        registry = ToolRegistry(configs)
+        registry = ToolRegistry(sections)
         tools1 = registry.get_tools()
         tools2 = registry.get_tools()
         # Same contents but different list objects
@@ -436,16 +406,15 @@ class TestToolRegistry:
 
     def test_processor_applied(self):
         """When html_head_title_meta processor is specified, verify it's wired."""
-        configs = [
-            ToolConfig(
-                name="site",
+        sections = [
+            KnowledgeSection(
+                title="site",
                 description="d",
-                tool_type="url",
-                args={"url": "http://x"},
+                source_url="http://x",
                 processors=["html_head_title_meta"],
             ),
         ]
-        registry = ToolRegistry(configs)
+        registry = ToolRegistry(sections)
         tools = registry.get_tools()
         assert len(tools) == 1
         assert tools[0].name == "lookup"

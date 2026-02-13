@@ -1,22 +1,21 @@
 """Tool registry for LangGraph agents.
 
-The registry is a singleton that holds **no tool definitions in memory**.
-Each call to ``get_tools()`` delegates to ``get_app_config().tools``
-which re-reads YAML config from disk, so ConfigMap updates are picked
-up without a redeploy.
+Tools are **derived from ``persona.sections``** by convention.  Sections
+with a ``source_url`` become URL tools automatically.  The registry
+re-reads the persona config on every ``get_tools()`` call so that
+ConfigMap updates are picked up without a redeploy.
 """
 
 import asyncio
 import functools
 import logging
-from collections import defaultdict
 from datetime import timedelta
 from typing import Any, Type
 
 from langchain_core.tools import BaseTool
 
 from chatty.configs.config import get_app_config
-from chatty.configs.tools import ToolConfig
+from chatty.configs.persona import KnowledgeSection
 from chatty.infra import singleton
 
 from .model import ToolBuilder
@@ -45,16 +44,15 @@ def _apply_timeout(tool: BaseTool, timeout: timedelta) -> BaseTool:
 
 
 class ToolRegistry:
-    """Registry for managing tool builders and creating tool instances.
+    """Registry that derives tools from ``persona.sections``.
 
-    Groups YAML tool configs by ``tool_type`` and calls each builder's
-    ``from_configs`` once per group to produce a single dispatcher tool
-    per type.
+    Sections with ``source_url`` are treated as URL tools.  Each builder
+    receives the matching sections and produces a single dispatcher tool.
 
-    When constructed with explicit *configs* (useful in tests), tools are
-    eagerly built and cached.  Otherwise ``get_tools()`` re-reads config
-    via ``get_app_config()`` on every call so that ConfigMap updates are
-    reflected immediately.
+    When constructed with explicit *sections* (useful in tests), tools
+    are eagerly built and cached.  Otherwise ``get_tools()`` re-reads
+    config via ``get_app_config()`` on every call so that ConfigMap
+    updates are reflected immediately.
     """
 
     _known_tools: dict[str, Type[ToolBuilder]] = {
@@ -64,24 +62,26 @@ class ToolRegistry:
         cls.processor_name: cls for cls in [HtmlHeadTitleMeta]
     }
 
-    def __init__(self, configs: list[ToolConfig] | None = None):
-        """Create a registry, optionally with fixed configs for testing."""
+    def __init__(
+        self, sections: list[KnowledgeSection] | None = None
+    ) -> None:
+        """Create a registry, optionally with fixed sections for testing."""
         self._tools: list[BaseTool] | None = None
-        if configs is not None:
-            # Eagerly build (and validate) when static configs are provided
-            self._tools = self._build_tools(configs)
+        if sections is not None:
+            self._tools = self._build_tools(sections)
 
     def get_tools(self) -> list[BaseTool]:
-        """Build and return tools from the latest config on disk.
+        """Build and return tools from the latest persona config.
 
         Each tool is wrapped with the global ``tool_timeout`` from
         ``ChatConfig`` so that no single invocation can run forever.
         """
         if self._tools is not None:
-            return list(self._tools)  # return a fresh list (same objects)
+            return list(self._tools)
 
         app_config = get_app_config()
-        tools = self._build_tools(app_config.tools)
+        sections = app_config.persona.sections
+        tools = self._build_tools(sections)
         for tool in tools:
             _apply_timeout(tool, app_config.chat.tool_timeout)
         return tools
@@ -90,35 +90,43 @@ class ToolRegistry:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _build_tools(self, configs: list[ToolConfig]) -> list[BaseTool]:
-        """Group configs by ``tool_type`` and create one dispatcher per group."""
-        groups: dict[str, list[ToolConfig]] = defaultdict(list)
-        for config in configs:
-            groups[config.tool_type].append(config)
+    @staticmethod
+    def _sections_with_url(
+        sections: list[KnowledgeSection],
+    ) -> list[KnowledgeSection]:
+        """Filter sections that have a ``source_url`` (→ URL tools)."""
+        return [s for s in sections if s.source_url]
 
-        tools: list[BaseTool] = []
-        for tool_type, group_configs in groups.items():
-            tool_builder = self._known_tools.get(tool_type)
-            if not tool_builder:
-                raise NotImplementedError(
-                    f"Tool type '{tool_type}' is not supported."
+    def _build_tools(
+        self, sections: list[KnowledgeSection]
+    ) -> list[BaseTool]:
+        """Build tools from persona knowledge sections.
+
+        Currently only the ``url`` tool type is supported.  All
+        sections with ``source_url`` are grouped into a single URL
+        dispatcher.
+        """
+        url_sections = self._sections_with_url(sections)
+        if not url_sections:
+            return []
+
+        tool_builder = self._known_tools.get("url")
+        if not tool_builder:
+            raise NotImplementedError("Tool type 'url' is not supported.")
+
+        # Resolve processors per section title
+        resolved_processors: dict[str, list[Any]] = {}
+        for section in url_sections:
+            if section.processors:
+                resolved_processors[section.title] = (
+                    self._resolve_processors(section.processors)
                 )
 
-            # Resolve processors per config name
-            resolved_processors: dict[str, list[Any]] = {}
-            for cfg in group_configs:
-                if cfg.processors:
-                    resolved_processors[cfg.name] = self._resolve_processors(
-                        cfg.processors
-                    )
-
-            tool = tool_builder.from_configs(
-                group_configs,
-                processors=resolved_processors if resolved_processors else None,
-            )
-            tools.append(tool)
-
-        return tools
+        tool = tool_builder.from_sections(
+            url_sections,
+            processors=resolved_processors if resolved_processors else None,
+        )
+        return [tool]
 
     def _resolve_processors(
         self, processor_names: list[str]
@@ -139,7 +147,7 @@ class ToolRegistry:
 def get_tool_registry() -> ToolRegistry:
     """Get the global tool registry singleton.
 
-    The registry itself is a singleton, but it reads fresh tool definitions
+    The registry itself is a singleton, but it reads fresh sections
     via ``get_app_config()`` on every ``get_tools()`` call.
     """
     return ToolRegistry()

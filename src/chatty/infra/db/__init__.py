@@ -13,6 +13,7 @@ from .models import (
     ROLE_SYSTEM,
     ROLE_TOOL,
     StoredToolCall,
+    TextEmbedding,
     ToolExtra,
 )
 from .repository import load_conversation_history
@@ -31,6 +32,7 @@ __all__ = [
     "ROLE_SYSTEM",
     "ROLE_TOOL",
     "StoredToolCall",
+    "TextEmbedding",
     "ToolExtra",
     "load_conversation_history",
 ]

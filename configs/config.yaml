@@ -46,12 +46,28 @@ chat:
   max_conversation_length: 3
   tool_timeout: 60  # seconds → timedelta
 
+# --- Embedding (non-secret tunables) ---
+embedding:
+  # endpoint: "http://localhost:8000/api/v1/"  # inject via CHATTY_EMBEDDING__ENDPOINT
+  # api_key: ""                                # inject via CHATTY_EMBEDDING__API_KEY
+  model_name: "text-embedding-ada-002"
+  dimensions: 1536
+
+# --- RAG ---
+rag:
+  top_k: 3
+  similarity_threshold: 0.7
+  cron_interval: 30
+
 # --- Concurrency gate ---
 concurrency:
   max_concurrency: 1
   inbox_max_size: 10
 
 # --- Persona ---
+# Knowledge sections are the single source of truth:
+#   - OneStep: sections with source_url become URL tools automatically
+#   - RAG: all sections are embedded for similarity search
 persona:
   name: Xinyu Huang
   character:
@@ -63,28 +79,23 @@ persona:
     - llm agent dev
     - web dev
     - devops & k8s
+  sections:
+    - title: current_homepage
+      description: |
+        Fetch Xinyu's personal website meta info.
+        Returns HTML head with title, author, icon URL, description, etc.
+        Use this to answer questions about Xinyu's personal site.
+      source_url: "https://x3huang.dev"
+      processors:
+        - html_head_title_meta
 
-# --- Tools (hot-reloadable via ConfigMap) ---
-tools:
-  - name: current_homepage
-    description: |
-      Fetch Xinyu's personal website meta info.
-      Returns HTML head with title, author, icon URL, description, etc.
-      Use this to answer questions about Xinyu's personal site.
-    tool_type: url
-    args:
-      url: https://x3huang.dev
-    processors:
-      - html_head_title_meta
-
-  - name: resume
-    description: |
-      Fetch Xinyu's resume / CV.
-      Returns the full plain-text content of the resume PDF including
-      professional background, skills, and experience.
-      Use this to answer questions about Xinyu's work experience
-      or qualifications.
-    tool_type: url
-    args:
-      url: https://x3huang.dev/resume
-      max_content_length: 8000
+    - title: resume
+      description: |
+        Fetch Xinyu's resume / CV.
+        Returns the full plain-text content of the resume PDF including
+        professional background, skills, and experience.
+        Use this to answer questions about Xinyu's work experience
+        or qualifications.
+      source_url: "https://x3huang.dev/resume"
+      args:
+        max_content_length: 8000

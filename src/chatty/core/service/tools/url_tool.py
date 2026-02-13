@@ -19,7 +19,7 @@ import httpx
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, create_model
 
-from chatty.configs.tools import ToolConfig
+from chatty.configs.persona import KnowledgeSection
 
 _PDF_CONTENT_TYPES = {"application/pdf", "application/x-pdf"}
 
@@ -187,36 +187,41 @@ class URLDispatcherTool(BaseTool):
     # ---- Factory ---------------------------------------------------------
 
     @classmethod
-    def from_configs(
+    def from_sections(
         cls,
-        configs: list[ToolConfig],
+        sections: list[KnowledgeSection],
         *,
         processors: dict[str, list[Any]] | None = None,
     ) -> Self:
-        """Build one dispatcher from a group of ``url`` tool configs.
+        """Build one dispatcher from persona knowledge sections.
 
         Parameters
         ----------
-        configs:
-            All ``ToolConfig`` entries with ``tool_type == "url"``.
+        sections:
+            ``KnowledgeSection`` entries with ``source_url`` set.
         processors:
-            Mapping of config name → list of resolved ``Processor``
+            Mapping of section title to list of resolved ``Processor``
             instances.  Built by the registry.
         """
         processors = processors or {}
 
         routes: dict[str, Route] = {}
-        # Compact one-line summary per source for the args_schema description
         resource_descriptions: dict[str, str] = {}
 
-        for cfg in configs:
-            args = URLToolArgs.model_validate(cfg.args)
-            route_processors = processors.get(cfg.name, [])
-            routes[cfg.name] = Route(args=args, processors=route_processors)
+        for section in sections:
+            # Merge source_url into args dict so URLToolArgs picks it up
+            merged_args = {"url": section.source_url, **section.args}
+            args = URLToolArgs.model_validate(merged_args)
+            route_processors = processors.get(section.title, [])
+            routes[section.title] = Route(
+                args=args, processors=route_processors
+            )
 
-            # First non-empty line of the YAML description → concise summary
-            desc = (cfg.description or "").strip().split("\n")[0].strip()
-            resource_descriptions[cfg.name] = desc
+            # Use explicit description or auto-generate from title
+            desc = (section.description or "").strip().split("\n")[0].strip()
+            if not desc:
+                desc = f"Fetch information about '{section.title}'."
+            resource_descriptions[section.title] = desc
 
         return cls(
             name="lookup",

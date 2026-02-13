@@ -3,27 +3,17 @@
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator
 
-from langchain_core.language_models import BaseLanguageModel
-
-from chatty.configs.config import AppConfig
-from chatty.core.service.tools.registry import ToolRegistry
-
 from .context import ChatContext
 from .events import StreamEvent
 
 
 class ChatService(ABC):
-    """Abstract base class for chat services."""
+    """Abstract base class for chat services.
 
-    @abstractmethod
-    def __init__(
-        self,
-        llm: BaseLanguageModel,
-        tools_registry: ToolRegistry,
-        config: AppConfig,
-    ) -> None:
-        """Initialize the chat service with required dependencies."""
-        super().__init__()
+    Defines the public streaming interface.  Each concrete service
+    declares its own ``__init__`` signature (OneStep needs a tool
+    registry, RAG needs an embedding client, etc.).
+    """
 
     @abstractmethod
     async def stream_response(
