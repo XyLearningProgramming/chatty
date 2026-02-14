@@ -1,25 +1,20 @@
 """Configuration management using pydantic-settings.
 
 **Not a singleton** — each call to ``get_app_config()`` re-reads config
-from disk so that ConfigMap updates are picked up without restarting.
+from disk so that changes are picked up without restarting.
 
 Priority order (highest first):
 
-1. ConfigMap YAML (path from ``CHATTY_CONFIGMAP_FILE`` env var, hot-reloadable)
-2. Environment variables (``CHATTY_`` prefix)
-3. ``.env`` dotenv file
-4. Static YAML (``configs/config.yaml`` -- baked into the Docker image)
-5. Init defaults / field defaults
-6. File secrets
-
-Caveat: only the *contents* of the known config files are dynamic.
-The file paths are resolved at import time; adding brand-new files
-after startup requires a process restart.
+1. Environment variables (``CHATTY_`` prefix)
+2. ``.env`` dotenv file
+3. YAML config (``configs/config.yaml`` -- baked into the Docker image,
+   replaced by the ConfigMap subPath mount in Kubernetes)
+4. Init defaults / field defaults
+5. File secrets
 """
 
-import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from pydantic import Field
@@ -51,18 +46,12 @@ CONFIG_PY_PATH = Path(__file__).resolve()
 PROJECT_ROOT = CONFIG_PY_PATH.parent.parent.parent.parent
 CONFIG_DIR = PROJECT_ROOT / "configs"
 
-# Single known config file (baked into the Docker image).
+# YAML config file.  Baked into the Docker image at build time;
+# in Kubernetes the ConfigMap is mounted over this path via subPath.
 STATIC_CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
 # Prompt configuration file
 PROMPT_CONFIG_FILE = CONFIG_DIR / "prompt.yml"
-
-# Optional ConfigMap override file.  The Helm chart injects the env var
-# ``CHATTY_CONFIGMAP_FILE`` pointing to the mounted config file when a
-# ConfigMap is deployed.  No hardcoded path — the chart decides where to
-# mount.
-_configmap_env = os.environ.get("CHATTY_CONFIGMAP_FILE")
-CONFIGMAP_CONFIG_FILE: Optional[Path] = Path(_configmap_env) if _configmap_env else None
 
 DOTENV_FILE_PATH = PROJECT_ROOT / ".env"
 ENV_DELIMITER = "__"  # Nested environment variable delimiter
@@ -150,26 +139,17 @@ class AppConfig(BaseSettings):
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         sources: list[PydanticBaseSettingsSource] = []
 
-        # 1. ConfigMap YAML -- highest priority (hot-reloadable)
-        if CONFIGMAP_CONFIG_FILE is not None and CONFIGMAP_CONFIG_FILE.is_file():
-            sources.append(
-                YamlConfigSettingsSource(
-                    settings_cls,
-                    yaml_file=CONFIGMAP_CONFIG_FILE,
-                )
-            )
-
-        # 2-3. Env vars and dotenv
+        # 1-2. Env vars and dotenv
         sources.append(env_settings)
         sources.append(dotenv_settings)
 
-        # 4. Static YAML (baked into image)
+        # 3. YAML config (baked into image / replaced by ConfigMap in k8s)
         sources.append(YamlConfigSettingsSource(settings_cls))
 
-        # 4.5. Prompt YAML (separate file)
+        # 3.5. Prompt YAML (separate file)
         sources.append(_PromptYamlSettingsSource(settings_cls))
 
-        # 5-6. Init defaults and file secrets
+        # 4-5. Init defaults and file secrets
         sources.append(init_settings)
         sources.append(file_secret_settings)
 
@@ -201,8 +181,7 @@ class _PromptYamlSettingsSource(PydanticBaseSettingsSource):
 def get_app_config() -> AppConfig:
     """Get the application configuration.
 
-    Re-reads ``configs/config.yaml`` (and the ConfigMap override when
-    present) on every call so that hot-reloaded values are picked up
-    immediately.
+    Re-reads ``configs/config.yaml`` on every call so that changes are
+    picked up immediately.
     """
     return AppConfig()

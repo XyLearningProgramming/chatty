@@ -1,8 +1,8 @@
 # Chatty application configuration (single merged config).
 #
 # This file is baked into the Docker image at /app/configs/config.yaml.
-# In Kubernetes the same content is also served as a ConfigMap mounted
-# at /app/configmap/config.yaml (highest priority, hot-reloadable).
+# In Kubernetes a ConfigMap (built from this file) is mounted over the
+# same path via subPath, replacing the baked-in copy.
 #
 # Secret values should be injected via environment variables / k8s secrets:
 #   CHATTY_LLM__ENDPOINT            – LLM server URL

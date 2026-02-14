@@ -73,12 +73,11 @@ autoscaling:
   targetCPUUtilizationPercentage: 80
   targetMemoryUtilizationPercentage: 99
 
-# YAML config mounted as a ConfigMap (hot-reloadable).
-# Takes the highest priority, above env vars.
+# YAML config mounted as a ConfigMap at /app/configs/config.yaml (subPath).
+# Replaces the baked-in config file; pod restart required for changes.
 # Secret values (LLM keys, DB URIs) should NOT go here -- use k8s secrets.
 # Content is injected by helmfile from configs/config.yaml via readFile.
 configMapData: {}
-configMapMountPath: /app/configmap
 
 volumes: {}
 

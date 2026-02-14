@@ -47,17 +47,10 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{/* Inject env vars from the Kubernetes secret */}}
           {{- $secret := lookup "v1" "Secret" .Release.Namespace .Values.secretName }}
-          {{- if or $secret .Values.configMapData }}
           {{- if $secret }}
           envFrom:
             - secretRef:
                 name: {{ .Values.secretName }}
-          {{- end }}
-          {{- if .Values.configMapData }}
-          env:
-            - name: CHATTY_CONFIGMAP_FILE
-              value: {{ .Values.configMapMountPath }}/config.yaml
-          {{- end }}
           {{- end }}
           ports:
             - name: http
@@ -79,7 +72,8 @@ spec:
           volumeMounts:
           {{- if .Values.configMapData }}
             - name: configmap-yaml
-              mountPath: {{ .Values.configMapMountPath }}
+              mountPath: /app/configs/config.yaml
+              subPath: config.yaml
               readOnly: true
           {{- end }}
           {{- with .Values.volumeMounts }}
