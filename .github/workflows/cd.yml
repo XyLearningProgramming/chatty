@@ -8,9 +8,9 @@ on:
     branches: [main]
 
 env:
-  HELMFILE_FILE_PATH: ./deploy/helmfile/helmfile.yaml.gotmpl
   IMAGE_REPOSITORY: ${{ secrets.IMAGE_NAME }}
   IMAGE_TAG: ${{ github.sha }}
+  NAMESPACE: backend
 
 jobs:
   deploy:
@@ -34,9 +34,12 @@ jobs:
           docker build -t $IMAGE_REPOSITORY:$IMAGE_TAG .
           docker push $IMAGE_REPOSITORY:$IMAGE_TAG
 
-      - name: Deploy with Helmfile
-        uses: ./.github/actions/deploy-helmfile
+      - name: Deploy with Helm
+        uses: ./.github/actions/helm-deploy
         with:
-          helmfile-args: --environment prod
-          kube-config: ${{ secrets.KUBE_CONFIG_DATA }}
-          chatty-env: ${{ secrets.CHATTY_ENV }}
+          image_tag: ${{ env.IMAGE_TAG }}
+          registry_repository: ${{ env.IMAGE_REPOSITORY }}
+          kube_config_data: ${{ secrets.KUBE_CONFIG_DATA }}
+          chatty_env: ${{ secrets.CHATTY_ENV }}
+          namespace: ${{ env.NAMESPACE }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}

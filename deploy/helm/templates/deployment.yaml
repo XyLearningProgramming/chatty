@@ -39,11 +39,7 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if and .Values.IMAGE_REPOSITORY .Values.IMAGE_TAG }}
-          image: "{{ .Values.IMAGE_REPOSITORY }}:{{ .Values.IMAGE_TAG }}"
-          {{- else }}
-          {{- fail "IMAGE_REPOSITORY and IMAGE_TAG are required for chatty deployment" }}
-          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{/* Inject env vars from the Kubernetes secret */}}
           {{- $secret := lookup "v1" "Secret" .Release.Namespace .Values.secretName }}

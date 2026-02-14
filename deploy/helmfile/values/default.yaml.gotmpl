@@ -1,7 +1,0 @@
-DOMAIN: test.x3huang.dev
-IMAGE_REPOSITORY: x3huang/chatty
-IMAGE_TAG: local-1
-
-configMapData:
-  config.yaml: |
-{{ readFile "../../configs/config.yaml" | indent 4 }}

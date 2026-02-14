@@ -1,0 +1,79 @@
+name: 'Helm Deploy'
+description: 'Deploy Chatty using Helm with secret management and configmap injection'
+inputs:
+  image_tag:
+    description: 'Docker image tag to deploy'
+    required: true
+  registry_repository:
+    description: 'Docker registry repository (e.g. ghcr.io/org/chatty)'
+    required: true
+  kube_config_data:
+    description: 'Base64 encoded kubeconfig'
+    required: true
+  chatty_env:
+    description: 'Chatty environment variables (.env content for k8s secret)'
+    required: false
+    default: ''
+  namespace:
+    description: 'Kubernetes namespace'
+    required: true
+    default: 'backend'
+  github_token:
+    description: 'GitHub token for Helm installation'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+
+    - name: Set up Kubernetes config
+      shell: bash
+      run: |
+        mkdir -p $HOME/.kube
+        echo '${{ inputs.kube_config_data }}' | base64 --decode > $HOME/.kube/config
+        chmod 600 $HOME/.kube/config
+
+    - name: Upsert Kubernetes secret
+      if: inputs.chatty_env != ''
+      shell: bash
+      run: |
+        # Write env content to temporary file
+        echo "${{ inputs.chatty_env }}" > /tmp/chatty.env
+
+        # Use apply script to create/update secrets
+        ./deploy/secret/apply.sh /tmp/chatty.env
+
+        # Clean up temp file
+        rm -f /tmp/chatty.env
+
+    - name: Deploy with Helm
+      shell: bash
+      run: |
+        helm upgrade --install chatty ./deploy/helm \
+          --namespace ${{ inputs.namespace }} \
+          --create-namespace \
+          --set image.repository=${{ inputs.registry_repository }} \
+          --set image.tag="${{ inputs.image_tag }}" \
+          --set metrics.podMonitor.enabled=true \
+          --set-file "configMapData.config\.yaml=configs/config.yaml" \
+          --wait \
+          --timeout 10m
+
+    - name: Cleanup on cancellation
+      if: cancelled()
+      shell: bash
+      run: |
+        echo "Workflow cancelled, attempting helm rollback..."
+        helm rollback chatty 0 -n ${{ inputs.namespace }} --wait --timeout 5m || true
+
+    - name: Verify deployment
+      shell: bash
+      run: |
+        kubectl rollout status deployment/chatty -n ${{ inputs.namespace }} --timeout=300s
+        kubectl get pods -n ${{ inputs.namespace }} -l app.kubernetes.io/name=chatty
