@@ -254,11 +254,11 @@ class Vector(TypeDecorator):
 
 
 class SourceEmbedding(Base):
-    """Embedded match-hints vector for a persona knowledge source.
+    """Embedded match-hint vector for a persona knowledge source.
 
-    Keyed by ``(source_id, model_name)`` where ``source_id`` is the
-    persona config key (e.g. ``"resume"``).  The vector is the
-    embedding of the concatenated ``match_hints`` text for that source.
+    Each row stores **one** hint phrase and its embedding vector.
+    Multiple rows can share the same ``source_id`` (one per hint).
+    Uniqueness is enforced on ``(source_id, text, model_name)``.
     """
 
     __tablename__ = "source_embeddings"
@@ -269,6 +269,10 @@ class SourceEmbedding(Base):
         autoincrement=True,
     )
     source_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    text: Mapped[str] = mapped_column(
         String,
         nullable=False,
     )
@@ -288,8 +292,9 @@ class SourceEmbedding(Base):
 
     __table_args__ = (
         Index(
-            "uq_source_embeddings_source_id_model_name",
+            "uq_source_embeddings_source_text_model",
             "source_id",
+            "text",
             "model_name",
             unique=True,
         ),
@@ -299,5 +304,6 @@ class SourceEmbedding(Base):
         return (
             f"<SourceEmbedding(id={self.id}, "
             f"source_id={self.source_id!r}, "
+            f"text={self.text!r}, "
             f"model_name={self.model_name!r})>"
         )

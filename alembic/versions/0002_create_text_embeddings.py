@@ -29,6 +29,7 @@ def upgrade() -> None:
             "id", sa.BigInteger(), autoincrement=True, nullable=False
         ),
         sa.Column("source_id", sa.String(), nullable=False),
+        sa.Column("text", sa.String(), nullable=False),
         sa.Column("embedding", sa.Text(), nullable=False),
         sa.Column("model_name", sa.String(), nullable=False),
         sa.Column(
@@ -49,9 +50,9 @@ def upgrade() -> None:
     )
 
     op.create_index(
-        "uq_source_embeddings_source_id_model_name",
+        "uq_source_embeddings_source_text_model",
         "source_embeddings",
-        ["source_id", "model_name"],
+        ["source_id", "text", "model_name"],
         unique=True,
     )
 
@@ -66,7 +67,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index(
-        "uq_source_embeddings_source_id_model_name",
+        "uq_source_embeddings_source_text_model",
         table_name="source_embeddings",
     )
     op.execute(

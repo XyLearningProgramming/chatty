@@ -3,8 +3,8 @@
 Each tick:
 
 1. Reads ``persona.embed`` declarations from the (hot-reloadable) config.
-2. For each declaration whose ``source_id`` is not yet in the DB,
-   embeds the ``match_hints`` text (gated) and upserts the vector.
+2. For each individual hint that is not yet in the DB, embeds it
+   (gated) and upserts the vector.  Each hint gets its own row.
 
 Content resolution is NOT this module's job — whoever needs a source's
 content resolves it ad hoc at request time.
@@ -21,7 +21,6 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Request
 
 from chatty.configs.config import AppConfig, get_app_config
-from chatty.configs.persona import EmbedDeclaration
 from chatty.infra.concurrency.base import AcquireTimeout
 from chatty.infra.concurrency.semaphore import build_semaphore
 from chatty.infra.db.embedding import EmbeddingRepository
@@ -33,21 +32,17 @@ from .gated import GatedEmbedModel
 logger = logging.getLogger(__name__)
 
 
-def _match_hints_text(decl: EmbedDeclaration) -> str:
-    """Build the text to embed from match_hints."""
-    return "\n".join(decl.match_hints)
-
-
 # ------------------------------------------------------------------
 # EmbeddingCron
 # ------------------------------------------------------------------
 
 
 class EmbeddingCron:
-    """Embeds match_hints for persona sources that are not yet in the DB.
+    """Embeds individual match_hints for persona sources.
 
-    Uses ``EmbeddingRepository`` for DB ops and ``GatedEmbedModel``
-    only for the gated embed call.
+    Each hint is embedded as a separate row.  On every tick the cron
+    checks for any missing ``(source_id, text, model_name)`` tuples
+    and fills them in.
     """
 
     def __init__(
@@ -98,37 +93,37 @@ class EmbeddingCron:
 
     async def _tick(self) -> None:
         config = get_app_config()
-        embed_decls = config.persona.embed
         model_name = self.embedder.model_name
 
-        for decl in embed_decls:
-            if await self.repository.exists(decl.source, model_name):
-                continue
+        existing = await self.repository.all_existing_texts(model_name)
 
-            hints_text = _match_hints_text(decl)
-            if not hints_text:
-                continue
+        for decl in config.persona.embed:
+            for hint in decl.match_hints:
+                if not hint or (decl.source, hint) in existing:
+                    continue
 
-            try:
-                vec = await self.embedder.embed(hints_text)
-                await self.repository.upsert(
-                    decl.source, vec, model_name
-                )
-                logger.info(
-                    "Cron: embedded match_hints for source '%s'",
-                    decl.source,
-                )
-            except AcquireTimeout:
-                logger.debug(
-                    "Cron: semaphore busy, skipping source '%s'",
-                    decl.source,
-                )
-            except Exception:
-                logger.warning(
-                    "Cron: failed to embed/upsert source '%s'",
-                    decl.source,
-                    exc_info=True,
-                )
+                try:
+                    vec = await self.embedder.embed(hint)
+                    await self.repository.upsert(
+                        decl.source, hint, vec, model_name
+                    )
+                    logger.info(
+                        "Cron: embedded hint '%s' for source '%s'",
+                        hint,
+                        decl.source,
+                    )
+                except AcquireTimeout:
+                    logger.debug(
+                        "Cron: semaphore busy, skipping hint '%s'",
+                        hint,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Cron: failed to embed hint '%s' for source '%s'",
+                        hint,
+                        decl.source,
+                        exc_info=True,
+                    )
 
 
 # ------------------------------------------------------------------
