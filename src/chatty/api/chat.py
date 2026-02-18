@@ -12,6 +12,7 @@ from chatty.core.service.models import (
     QueuedEvent,
     StreamEvent,
 )
+from chatty.core.service.metrics import INBOX_REJECTIONS_TOTAL
 from chatty.infra.concurrency import InboxFull
 from chatty.infra.id_utils import generate_id
 from chatty.infra.telemetry import get_current_trace_id
@@ -115,6 +116,7 @@ async def chat(
     try:
         position = await inbox.enter()
     except InboxFull:
+        INBOX_REJECTIONS_TOTAL.inc()
         return JSONResponse(
             status_code=429,
             content={"detail": "Too many requests in flight. Try again later."},

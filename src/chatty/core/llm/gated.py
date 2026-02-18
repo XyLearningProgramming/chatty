@@ -77,6 +77,7 @@ class GatedChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         async with self.semaphore.slot():
+            logger.debug("LLM generate: acquired semaphore slot")
             return await self.inner._agenerate(
                 messages, stop, run_manager, **kwargs
             )
@@ -89,6 +90,7 @@ class GatedChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         async with self.semaphore.slot():
+            logger.debug("LLM stream: acquired semaphore slot")
             async for chunk in self.inner._astream(
                 messages, stop, run_manager, **kwargs
             ):

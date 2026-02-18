@@ -7,11 +7,24 @@ details are internal.
 
 from __future__ import annotations
 
+import logging
+import time
+
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from chatty.infra.telemetry import (
+    ATTR_EMBEDDING_RESULT_COUNT,
+    ATTR_EMBEDDING_THRESHOLD,
+    ATTR_EMBEDDING_TOP_K,
+    SPAN_EMBEDDING_SEARCH,
+    tracer,
+)
+
 from .models import SourceEmbedding
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants (no magic strings below)
@@ -144,14 +157,31 @@ class EmbeddingRepository:
         top_k: int,
     ) -> list[tuple[str, float]]:
         """Search similar embeddings; returns (source_id, similarity) tuples."""
-        async with self._session_factory() as session:
-            return await search(
-                session,
-                query_embedding,
-                model_name,
-                similarity_threshold,
-                top_k,
+        from chatty.core.service.metrics import EMBEDDING_LATENCY_SECONDS
+
+        with tracer.start_as_current_span(SPAN_EMBEDDING_SEARCH) as span:
+            span.set_attribute(ATTR_EMBEDDING_TOP_K, top_k)
+            span.set_attribute(ATTR_EMBEDDING_THRESHOLD, similarity_threshold)
+            start = time.monotonic()
+            async with self._session_factory() as session:
+                results = await search(
+                    session,
+                    query_embedding,
+                    model_name,
+                    similarity_threshold,
+                    top_k,
+                )
+            EMBEDDING_LATENCY_SECONDS.labels(operation="search").observe(
+                time.monotonic() - start
             )
+            span.set_attribute(ATTR_EMBEDDING_RESULT_COUNT, len(results))
+            logger.debug(
+                "Embedding search: %d results (top_k=%d, threshold=%.2f)",
+                len(results),
+                top_k,
+                similarity_threshold,
+            )
+            return results
 
     async def upsert(
         self,

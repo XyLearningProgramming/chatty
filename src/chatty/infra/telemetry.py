@@ -10,34 +10,84 @@ Auto-instrumentations wired here:
 - **httpx** (outbound HTTP spans — covers ``langchain-openai`` LLM calls)
 - **SQLAlchemy** (DB spans)
 
+``build_telemetry`` is a lifespan dependency (same pattern as ``build_db``,
+``build_inbox``, etc.).  It depends on ``build_db`` so the engine is
+available for SQLAlchemy instrumentation.
+
 Usage::
 
-    # In app.py — before lifespan:
-    from chatty.infra.telemetry import init_telemetry
-    init_telemetry(app, config.tracing)
-
-    # In app.py — inside lifespan, after engine is created:
-    from chatty.infra.telemetry import instrument_sqlalchemy
-    instrument_sqlalchemy(engine)
-
     # In request handlers:
-    from chatty.infra.telemetry import get_current_trace_id
+    from chatty.infra.telemetry import get_current_trace_id, tracer
     trace_id = get_current_trace_id()  # 32-char hex or None
+
+    with tracer.start_as_current_span(SPAN_RAG_PIPELINE) as span:
+        ...
 """
 
 from __future__ import annotations
 
 import base64
 import logging
+from collections.abc import AsyncGenerator
+from typing import Annotated
 
+from fastapi import Depends, FastAPI
 from opentelemetry import trace
 from opentelemetry.trace import format_trace_id
 
+from chatty.configs.config import AppConfig, get_app_config
 from chatty.configs.system import TracingConfig
+from chatty.infra.db.engine import build_db
+from chatty.infra.lifespan import get_app
 
 logger = logging.getLogger(__name__)
 
 _otel_enabled = False
+
+tracer = trace.get_tracer("chatty")
+
+# ---------------------------------------------------------------------------
+# Span names — single source of truth for all custom spans
+# ---------------------------------------------------------------------------
+
+SPAN_RAG_PIPELINE = "rag.pipeline"
+SPAN_RAG_RETRIEVE = "rag.retrieve"
+SPAN_EMBEDDING_EMBED = "embedding.embed"
+SPAN_EMBEDDING_SEARCH = "embedding.search"
+SPAN_EMBEDDING_CRON_TICK = "embedding.cron_tick"
+SPAN_TOOL_URL_DISPATCHER = "tool.url_dispatcher"
+SPAN_SEMAPHORE_SLOT = "semaphore.slot"
+SPAN_INBOX_ENTER = "inbox.enter"
+SPAN_HISTORY_LOAD = "history.load"
+
+# ---------------------------------------------------------------------------
+# Span attribute keys
+# ---------------------------------------------------------------------------
+
+ATTR_RAG_QUERY_LEN = "rag.query_len"
+ATTR_RAG_THRESHOLD = "rag.threshold"
+ATTR_RAG_TOP_K = "rag.top_k"
+ATTR_RAG_RESULT_COUNT = "rag.result_count"
+
+ATTR_EMBEDDING_MODEL = "embedding.model"
+ATTR_EMBEDDING_TEXT_LEN = "embedding.text_len"
+ATTR_EMBEDDING_TOP_K = "embedding.top_k"
+ATTR_EMBEDDING_THRESHOLD = "embedding.threshold"
+ATTR_EMBEDDING_RESULT_COUNT = "embedding.result_count"
+
+ATTR_CRON_EMBEDDED = "cron.embedded"
+ATTR_CRON_TOTAL_PENDING = "cron.total_pending"
+
+ATTR_TOOL_SOURCE = "tool.source"
+ATTR_TOOL_ERROR = "tool.error"
+
+ATTR_SEMAPHORE_TIMEOUT = "semaphore.timeout"
+
+ATTR_INBOX_POSITION = "inbox.position"
+ATTR_INBOX_REJECTED = "inbox.rejected"
+
+ATTR_HISTORY_CONVERSATION_ID = "history.conversation_id"
+ATTR_HISTORY_MESSAGE_COUNT = "history.message_count"
 
 
 def init_telemetry(
@@ -139,3 +189,23 @@ def get_current_trace_id() -> str | None:
     if ctx is None or not ctx.is_valid:
         return None
     return format_trace_id(ctx.trace_id)
+
+
+# ---------------------------------------------------------------------------
+# Lifespan dependency
+# ---------------------------------------------------------------------------
+
+
+async def build_telemetry(
+    app: Annotated[FastAPI, Depends(get_app)],
+    config: Annotated[AppConfig, Depends(get_app_config)],
+    _db: Annotated[None, Depends(build_db)],
+) -> AsyncGenerator[None, None]:
+    """Initialise OTEL tracing + SQLAlchemy instrumentation.
+
+    Depends on ``build_db`` so the engine is available for SQLAlchemy
+    instrumentation.  When tracing is disabled both calls are no-ops.
+    """
+    init_telemetry(app, config.tracing)
+    instrument_sqlalchemy(app.state.engine)
+    yield

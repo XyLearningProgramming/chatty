@@ -64,6 +64,7 @@ async def sse_stream(
     except asyncio.CancelledError:
         raise
     except Exception as e:
+        logger.warning("Unexpected error in SSE stream", exc_info=True)
         yield format_error_sse(e)
     finally:
         if on_finish:

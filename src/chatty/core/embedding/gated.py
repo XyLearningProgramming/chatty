@@ -6,10 +6,22 @@ Single method: ``embed(text) -> list[float]``.  Everything else
 
 from __future__ import annotations
 
+import logging
+import time
+
 import openai
 
 from chatty.configs.system import EmbeddingConfig
+from chatty.core.service.metrics import EMBEDDING_LATENCY_SECONDS
 from chatty.infra.concurrency.semaphore import ModelSemaphore
+from chatty.infra.telemetry import (
+    ATTR_EMBEDDING_MODEL,
+    ATTR_EMBEDDING_TEXT_LEN,
+    SPAN_EMBEDDING_EMBED,
+    tracer,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class GatedEmbedModel:
@@ -33,9 +45,21 @@ class GatedEmbedModel:
 
     async def embed(self, text: str) -> list[float]:
         """Return the embedding vector for *text* (gated)."""
-        async with self._semaphore.slot():
-            response = await self._openai.embeddings.create(
-                input=text,
-                model=self._config.model_name,
+        with tracer.start_as_current_span(SPAN_EMBEDDING_EMBED) as span:
+            span.set_attribute(ATTR_EMBEDDING_MODEL, self._config.model_name)
+            span.set_attribute(ATTR_EMBEDDING_TEXT_LEN, len(text))
+            logger.debug(
+                "Embedding text (model=%s, len=%d)",
+                self._config.model_name,
+                len(text),
+            )
+            start = time.monotonic()
+            async with self._semaphore.slot():
+                response = await self._openai.embeddings.create(
+                    input=text,
+                    model=self._config.model_name,
+                )
+            EMBEDDING_LATENCY_SECONDS.labels(operation="embed").observe(
+                time.monotonic() - start
             )
             return response.data[0].embedding

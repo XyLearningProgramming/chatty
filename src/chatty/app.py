@@ -21,7 +21,7 @@ from chatty.infra.concurrency.inbox import build_inbox
 from chatty.infra.concurrency.semaphore import build_semaphore
 from chatty.infra.db.engine import build_db
 from chatty.infra.lifespan import inject
-from chatty.infra.telemetry import init_telemetry
+from chatty.infra.telemetry import build_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(
     app: FastAPI,
     _db: Annotated[None, Depends(build_db)],
+    _telemetry: Annotated[None, Depends(build_telemetry)],
     _inbox: Annotated[None, Depends(build_inbox)],
     _semaphore: Annotated[None, Depends(build_semaphore)],
     _cron: Annotated[None, Depends(build_cron)],
@@ -73,7 +74,6 @@ def get_app() -> FastAPI:
     app.include_router(chat_router, prefix=api_prefix)
     app.include_router(health_router)
 
-    init_telemetry(app)
     Instrumentator().instrument(app).expose(
         app, endpoint="/metrics"
     )

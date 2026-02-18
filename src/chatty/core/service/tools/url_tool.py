@@ -7,6 +7,7 @@ URLs and processing details are never exposed to the model.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Self, Type
 
 from langchain_core.tools import BaseTool
@@ -15,6 +16,14 @@ from pydantic import BaseModel, Field, PrivateAttr, create_model
 from chatty.configs.persona import KnowledgeSource, ToolDeclaration
 from chatty.configs.system import PromptConfig
 from chatty.infra.http_utils import HttpClient
+from chatty.infra.telemetry import (
+    ATTR_TOOL_ERROR,
+    ATTR_TOOL_SOURCE,
+    SPAN_TOOL_URL_DISPATCHER,
+    tracer,
+)
+
+logger = logging.getLogger(__name__)
 
 _TOOL_TYPE = "url_dispatcher"
 _SCHEMA_NAME = "LookupInput"
@@ -45,16 +54,20 @@ class URLDispatcherTool(BaseTool):
         raise NotImplementedError("Use async — call via _arun")
 
     async def _arun(self, source: str) -> str:
-        src = self.sources.get(source)
-        if src is None:
-            valid = ", ".join(f'"{k}"' for k in self.sources)
-            return self._prompt.render_tool_error(
-                source=source, valid=valid
+        with tracer.start_as_current_span(SPAN_TOOL_URL_DISPATCHER) as span:
+            span.set_attribute(ATTR_TOOL_SOURCE, source)
+            logger.debug("Tool dispatch: source=%s", source)
+            src = self.sources.get(source)
+            if src is None:
+                span.set_attribute(ATTR_TOOL_ERROR, "invalid_source")
+                valid = ", ".join(f'"{k}"' for k in self.sources)
+                return self._prompt.render_tool_error(
+                    source=source, valid=valid
+                )
+            return await src.get_content(
+                HttpClient.get,
+                extra_processors=self.action_processors or None,
             )
-        return await src.get_content(
-            HttpClient.get,
-            extra_processors=self.action_processors or None,
-        )
 
     # ---- Factory ---------------------------------------------------------
 

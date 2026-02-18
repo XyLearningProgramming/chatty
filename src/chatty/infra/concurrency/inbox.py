@@ -12,8 +12,14 @@ from redis.asyncio import Redis
 from chatty.configs.config import AppConfig, get_app_config
 from chatty.infra.lifespan import get_app
 from chatty.infra.redis import build_redis
+from chatty.infra.telemetry import (
+    ATTR_INBOX_POSITION,
+    ATTR_INBOX_REJECTED,
+    SPAN_INBOX_ENTER,
+    tracer,
+)
 
-from .base import InboxBackend
+from .base import InboxBackend, InboxFull
 from .local_backend import LocalInboxBackend
 from .redis_backend import RedisInboxBackend
 
@@ -44,7 +50,16 @@ class Inbox:
 
     async def enter(self) -> int:
         """Admit into the inbox.  Returns position.  Raises ``InboxFull``."""
-        return await self._backend.enter()
+        with tracer.start_as_current_span(SPAN_INBOX_ENTER) as span:
+            try:
+                position = await self._backend.enter()
+            except InboxFull:
+                span.set_attribute(ATTR_INBOX_REJECTED, True)
+                logger.info("Inbox full — rejecting request")
+                raise
+            span.set_attribute(ATTR_INBOX_POSITION, position)
+            logger.debug("Inbox enter: position=%d", position)
+            return position
 
     async def leave(self) -> None:
         """Leave the inbox (always call, even on error)."""

@@ -13,6 +13,13 @@ from langchain_core.messages import BaseMessage
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from chatty.infra.telemetry import (
+    ATTR_HISTORY_CONVERSATION_ID,
+    ATTR_HISTORY_MESSAGE_COUNT,
+    SPAN_HISTORY_LOAD,
+    tracer,
+)
+
 from .constants import (
     DEFAULT_MAX_MESSAGES,
     PARAM_CID,
@@ -54,28 +61,39 @@ class PgChatMessageHistory(BaseChatMessageHistory):
 
     async def aget_messages(self) -> list[BaseMessage]:
         """Load recent messages for this conversation, oldest-first."""
-        lim = self._max_messages or DEFAULT_MAX_MESSAGES
-        try:
-            async with self._session_factory() as session:
-                result = await session.execute(
-                    text(SQL_SELECT_MESSAGES),
-                    {
-                        PARAM_CID: self.conversation_id,
-                        PARAM_SYSTEM_ROLE: ROLE_SYSTEM,
-                        PARAM_LIM: lim,
-                    },
+        with tracer.start_as_current_span(SPAN_HISTORY_LOAD) as span:
+            span.set_attribute(ATTR_HISTORY_CONVERSATION_ID, self.conversation_id)
+            lim = self._max_messages or DEFAULT_MAX_MESSAGES
+            try:
+                async with self._session_factory() as session:
+                    result = await session.execute(
+                        text(SQL_SELECT_MESSAGES),
+                        {
+                            PARAM_CID: self.conversation_id,
+                            PARAM_SYSTEM_ROLE: ROLE_SYSTEM,
+                            PARAM_LIM: lim,
+                        },
+                    )
+                    rows = result.fetchall()
+            except Exception:
+                logger.warning(
+                    "Failed to load conversation history for %s",
+                    self.conversation_id,
+                    exc_info=True,
                 )
-                rows = result.fetchall()
-        except Exception:
-            logger.warning(
-                "Failed to load conversation history for %s",
+                return []
+            messages = [
+                m
+                for row in reversed(rows)
+                if (m := row_to_message(row)) is not None
+            ]
+            span.set_attribute(ATTR_HISTORY_MESSAGE_COUNT, len(messages))
+            logger.debug(
+                "Loaded %d messages for conversation %s",
+                len(messages),
                 self.conversation_id,
-                exc_info=True,
             )
-            return []
-        return [
-            m for row in reversed(rows) if (m := row_to_message(row)) is not None
-        ]
+            return messages
 
     async def aadd_messages(self, messages: list[BaseMessage]) -> None:
         """Append messages; requires trace_id. Fire-and-forget (log on error)."""

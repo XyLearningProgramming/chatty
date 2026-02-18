@@ -57,6 +57,65 @@ TOOL_CALLS_TOTAL = Counter(
     ["service", "tool_name", "status"],  # status: started | completed | error
 )
 
+# ---------------------------------------------------------------------------
+# Embedding metrics
+# ---------------------------------------------------------------------------
+
+EMBEDDING_LATENCY_SECONDS = Histogram(
+    "chatty_embedding_latency_seconds",
+    "Latency of embedding API calls",
+    ["operation"],  # "embed" | "search"
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+)
+
+EMBEDDING_CRON_RUNS_TOTAL = Counter(
+    "chatty_embedding_cron_runs_total",
+    "Total embedding cron tick outcomes",
+    ["status"],  # "ok" | "error" | "skipped"
+)
+
+EMBEDDING_CRON_HINTS_TOTAL = Counter(
+    "chatty_embedding_cron_hints_total",
+    "Total hints embedded by the cron",
+)
+
+# ---------------------------------------------------------------------------
+# RAG retrieval metrics
+# ---------------------------------------------------------------------------
+
+RAG_RETRIEVAL_LATENCY_SECONDS = Histogram(
+    "chatty_rag_retrieval_latency_seconds",
+    "End-to-end RAG retrieval latency (embed + search + resolve)",
+    buckets=(0.1, 0.25, 0.5, 1, 2, 5, 10),
+)
+
+RAG_SOURCES_RETURNED = Histogram(
+    "chatty_rag_sources_returned",
+    "Number of sources returned per RAG retrieval",
+    buckets=(0, 1, 2, 3, 5, 10),
+)
+
+# ---------------------------------------------------------------------------
+# Concurrency metrics
+# ---------------------------------------------------------------------------
+
+INBOX_REJECTIONS_TOTAL = Counter(
+    "chatty_inbox_rejections_total",
+    "Total inbox rejections (429 responses)",
+)
+
+SEMAPHORE_ACQUIRES_TOTAL = Counter(
+    "chatty_semaphore_acquires_total",
+    "Total semaphore acquire attempts",
+    ["result"],  # "ok" | "timeout"
+)
+
+SEMAPHORE_WAIT_SECONDS = Histogram(
+    "chatty_semaphore_wait_seconds",
+    "Time spent waiting for a semaphore slot",
+    buckets=(0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30),
+)
+
 
 # ---------------------------------------------------------------------------
 # Decorator

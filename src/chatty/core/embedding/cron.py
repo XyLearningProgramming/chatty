@@ -21,11 +21,21 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Request
 
 from chatty.configs.config import AppConfig, get_app_config
+from chatty.core.service.metrics import (
+    EMBEDDING_CRON_HINTS_TOTAL,
+    EMBEDDING_CRON_RUNS_TOTAL,
+)
 from chatty.infra.concurrency.base import AcquireTimeout
 from chatty.infra.concurrency.semaphore import build_semaphore
 from chatty.infra.db.embedding import EmbeddingRepository
 from chatty.infra.db.engine import build_db
 from chatty.infra.lifespan import get_app
+from chatty.infra.telemetry import (
+    ATTR_CRON_EMBEDDED,
+    ATTR_CRON_TOTAL_PENDING,
+    SPAN_EMBEDDING_CRON_TICK,
+    tracer,
+)
 
 from .gated import GatedEmbedModel
 
@@ -92,38 +102,54 @@ class EmbeddingCron:
             await asyncio.sleep(self._interval)
 
     async def _tick(self) -> None:
-        config = get_app_config()
-        model_name = self.embedder.model_name
+        with tracer.start_as_current_span(SPAN_EMBEDDING_CRON_TICK) as span:
+            config = get_app_config()
+            model_name = self.embedder.model_name
 
-        existing = await self.repository.all_existing_texts(model_name)
+            existing = await self.repository.all_existing_texts(model_name)
 
-        for decl in config.persona.embed:
-            for hint in decl.match_hints:
-                if not hint or (decl.source, hint) in existing:
-                    continue
+            embedded = 0
+            total_pending = 0
+            for decl in config.persona.embed:
+                for hint in decl.match_hints:
+                    if not hint or (decl.source, hint) in existing:
+                        continue
+                    total_pending += 1
 
-                try:
-                    vec = await self.embedder.embed(hint)
-                    await self.repository.upsert(
-                        decl.source, hint, vec, model_name
-                    )
-                    logger.info(
-                        "Cron: embedded hint '%s' for source '%s'",
-                        hint,
-                        decl.source,
-                    )
-                except AcquireTimeout:
-                    logger.debug(
-                        "Cron: semaphore busy, skipping hint '%s'",
-                        hint,
-                    )
-                except Exception:
-                    logger.warning(
-                        "Cron: failed to embed hint '%s' for source '%s'",
-                        hint,
-                        decl.source,
-                        exc_info=True,
-                    )
+                    try:
+                        vec = await self.embedder.embed(hint)
+                        await self.repository.upsert(
+                            decl.source, hint, vec, model_name
+                        )
+                        embedded += 1
+                        EMBEDDING_CRON_HINTS_TOTAL.inc()
+                        logger.info(
+                            "Cron: embedded hint '%s' for source '%s'",
+                            hint,
+                            decl.source,
+                        )
+                    except AcquireTimeout:
+                        EMBEDDING_CRON_RUNS_TOTAL.labels(status="skipped").inc()
+                        logger.debug(
+                            "Cron: semaphore busy, skipping hint '%s'",
+                            hint,
+                        )
+                    except Exception:
+                        EMBEDDING_CRON_RUNS_TOTAL.labels(status="error").inc()
+                        logger.warning(
+                            "Cron: failed to embed hint '%s' for source '%s'",
+                            hint,
+                            decl.source,
+                            exc_info=True,
+                        )
+
+            span.set_attribute(ATTR_CRON_EMBEDDED, embedded)
+            span.set_attribute(ATTR_CRON_TOTAL_PENDING, total_pending)
+            EMBEDDING_CRON_RUNS_TOTAL.labels(status="ok").inc()
+            if total_pending > 0:
+                logger.info(
+                    "Cron tick: embedded %d/%d hints", embedded, total_pending
+                )
 
 
 # ------------------------------------------------------------------

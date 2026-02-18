@@ -12,6 +12,7 @@ yet been computed by the background cron are silently skipped.
 from __future__ import annotations
 
 import logging
+import time
 
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseLanguageModel
@@ -20,8 +21,18 @@ from chatty.configs.config import AppConfig
 from chatty.core.embedding.gated import GatedEmbedModel
 from chatty.infra.db.embedding import EmbeddingRepository
 from chatty.infra.http_utils import HttpClient
+from chatty.infra.telemetry import (
+    ATTR_RAG_QUERY_LEN,
+    ATTR_RAG_RESULT_COUNT,
+    ATTR_RAG_THRESHOLD,
+    ATTR_RAG_TOP_K,
+    SPAN_RAG_PIPELINE,
+    SPAN_RAG_RETRIEVE,
+    tracer,
+)
 
 from .base import GraphChatService, PgCallbackFactory
+from .metrics import RAG_RETRIEVAL_LATENCY_SECONDS, RAG_SOURCES_RETURNED
 from .models import ChatContext
 
 logger = logging.getLogger(__name__)
@@ -67,38 +78,48 @@ class RagChatService(GraphChatService):
         Content is resolved ad hoc per source (inline or URL fetch)
         with source-level + embed-level processors applied.
         """
-        persona = self._config.persona
-        sources = persona.sources
-        embed_by_source = {d.source: d for d in persona.embed}
+        with tracer.start_as_current_span(SPAN_RAG_RETRIEVE) as span:
+            persona = self._config.persona
+            sources = persona.sources
+            embed_by_source = {d.source: d for d in persona.embed}
 
-        results = await self._embedding_repository.search(
-            query_emb,
-            self._embedder.model_name,
-            self._rag_config.similarity_threshold,
-            self._rag_config.top_k,
-        )
+            span.set_attribute(ATTR_RAG_THRESHOLD, self._rag_config.similarity_threshold)
+            span.set_attribute(ATTR_RAG_TOP_K, self._rag_config.top_k)
 
-        top_results: list[tuple[str, str, float]] = []
-        for source_id, similarity in results:
-            source = sources.get(source_id)
-            if source is None:
-                continue
-            try:
-                decl = embed_by_source.get(source_id)
-                content = await source.get_content(
-                    HttpClient.get,
-                    extra_processors=decl.get_processors() if decl else None,
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to resolve content for source '%s'",
-                    source_id,
-                    exc_info=True,
-                )
-                continue
-            top_results.append((source_id, content, similarity))
+            results = await self._embedding_repository.search(
+                query_emb,
+                self._embedder.model_name,
+                self._rag_config.similarity_threshold,
+                self._rag_config.top_k,
+            )
 
-        return top_results
+            top_results: list[tuple[str, str, float]] = []
+            for source_id, similarity in results:
+                source = sources.get(source_id)
+                if source is None:
+                    continue
+                try:
+                    decl = embed_by_source.get(source_id)
+                    content = await source.get_content(
+                        HttpClient.get,
+                        extra_processors=decl.get_processors() if decl else None,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to resolve content for source '%s'",
+                        source_id,
+                        exc_info=True,
+                    )
+                    continue
+                top_results.append((source_id, content, similarity))
+
+            span.set_attribute(ATTR_RAG_RESULT_COUNT, len(top_results))
+            logger.info(
+                "RAG: retrieved %d sources (threshold=%.2f)",
+                len(top_results),
+                self._rag_config.similarity_threshold,
+            )
+            return top_results
 
     # ------------------------------------------------------------------
     # Prompt construction
@@ -126,14 +147,22 @@ class RagChatService(GraphChatService):
 
     async def _create_graph(self, ctx: ChatContext):
         """Create a simple LangGraph agent with enriched RAG prompt."""
-        query_emb = await self._embedder.embed(ctx.query)
+        with tracer.start_as_current_span(SPAN_RAG_PIPELINE) as span:
+            span.set_attribute(ATTR_RAG_QUERY_LEN, len(ctx.query))
+            logger.debug("RAG pipeline: embedding query (len=%d)", len(ctx.query))
 
-        top_results = await self._retrieve_top_k(query_emb)
+            start = time.monotonic()
+            query_emb = await self._embedder.embed(ctx.query)
+            top_results = await self._retrieve_top_k(query_emb)
+            elapsed = time.monotonic() - start
 
-        enriched_prompt = self._build_rag_prompt(top_results)
+            RAG_RETRIEVAL_LATENCY_SECONDS.observe(elapsed)
+            RAG_SOURCES_RETURNED.observe(len(top_results))
 
-        return create_agent(
-            model=self._llm,
-            tools=[],
-            system_prompt=enriched_prompt,
-        )
+            enriched_prompt = self._build_rag_prompt(top_results)
+
+            return create_agent(
+                model=self._llm,
+                tools=[],
+                system_prompt=enriched_prompt,
+            )
