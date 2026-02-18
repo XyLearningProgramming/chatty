@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
+from typing import Annotated
 
+from fastapi import Depends, FastAPI, Request
 from redis.asyncio import Redis
 
-from chatty.configs.config import get_app_config
-from chatty.infra.singleton import singleton
+from chatty.configs.config import AppConfig, get_app_config
+from chatty.infra.lifespan import get_app
+from chatty.infra.redis import build_redis
 
 from .base import InboxBackend
 from .local_backend import LocalInboxBackend
@@ -26,7 +30,7 @@ class Inbox:
 
     Usage::
 
-        inbox = get_inbox()
+        inbox = get_inbox(request)
 
         position = await inbox.enter()   # InboxFull → 429
         try:
@@ -52,13 +56,16 @@ class Inbox:
 
 
 # ---------------------------------------------------------------------------
-# Singleton factory
+# Lifespan dependency
 # ---------------------------------------------------------------------------
 
 
-def _build_inbox_backend(redis_client: Redis | None) -> InboxBackend:
-    """Choose and construct the right inbox backend."""
-    config = get_app_config()
+async def build_inbox(
+    app: Annotated[FastAPI, Depends(get_app)],
+    redis_client: Annotated[Redis | None, Depends(build_redis)],
+    config: Annotated[AppConfig, Depends(get_app_config)],
+) -> AsyncGenerator[None, None]:
+    """Create an ``Inbox``, attach to ``app.state``; close on shutdown."""
     cc = config.concurrency
     agent_name = config.chat.agent_name
 
@@ -82,15 +89,17 @@ def _build_inbox_backend(redis_client: Redis | None) -> InboxBackend:
             cc.inbox_max_size,
         )
 
-    return backend
+    inbox = Inbox(backend)
+    app.state.inbox = inbox
+    yield
+    await inbox.aclose()
 
 
-@singleton
-def get_inbox(redis_client: Redis | None = None) -> Inbox:
-    """Return (or create) the singleton ``Inbox``.
+# ---------------------------------------------------------------------------
+# Per-request dependency — reads from app.state
+# ---------------------------------------------------------------------------
 
-    On the **first** call, supply *redis_client* (or ``None`` for the
-    local fallback).  Subsequent calls ignore arguments and return the
-    cached instance.
-    """
-    return Inbox(_build_inbox_backend(redis_client))
+
+def get_inbox(request: Request) -> Inbox:
+    """Return the ``Inbox`` stored on ``app.state`` by the lifespan."""
+    return request.app.state.inbox

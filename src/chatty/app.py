@@ -1,79 +1,47 @@
-"""FastAPI application entry point."""
+"""FastAPI application entry point.
 
-import asyncio
+Infrastructure is set up by lifespan dependencies (``build_*``).
+Each dep declares what it needs via ``Depends()``; ordering is
+resolved automatically by ``inject``.
+"""
+
 import logging
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Annotated
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
+from starlette.middleware.cors import CORSMiddleware
 
 from chatty.api.chat import router as chat_router
+from chatty.api.exceptions import build_exception_handlers
+from chatty.api.health import router as health_router
 from chatty.configs.config import get_app_config
-from chatty.core.embedding.cron import embedding_cron_loop
-from chatty.core.service.dependency import get_embedding_client
-from chatty.infra.concurrency.inbox import get_inbox
-from chatty.infra.concurrency.semaphore import get_model_semaphore
-from chatty.infra.redis import get_redis_client
+from chatty.core.embedding.cron import build_cron
+from chatty.infra.concurrency.inbox import build_inbox
+from chatty.infra.concurrency.semaphore import build_semaphore
+from chatty.infra.db.engine import build_db
+from chatty.infra.lifespan import inject
 from chatty.infra.telemetry import init_telemetry
 
 logger = logging.getLogger(__name__)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager for startup/shutdown events."""
-    # Startup logic
+@inject
+async def lifespan(
+    app: FastAPI,
+    _db: Annotated[None, Depends(build_db)],
+    _inbox: Annotated[None, Depends(build_inbox)],
+    _semaphore: Annotated[None, Depends(build_semaphore)],
+    _cron: Annotated[None, Depends(build_cron)],
+    _exc: Annotated[None, Depends(build_exception_handlers)],
+):
+    """Application lifespan — deps injected & cleaned up automatically."""
     logger.info("Starting Chatty application...")
-
-    # Redis -- tolerant of failure (None -> local fallback).
-    redis_client = None
-    try:
-        redis_client = get_redis_client()
-        await redis_client.ping()
-    except Exception:
-        logger.warning("Redis unavailable -- falling back to local concurrency backend.")
-
-    # Concurrency singletons -- first call initialises each.
-    get_inbox(redis_client)
-    get_model_semaphore(redis_client)
-
-    # Embedding cron -- pre-embeds persona sections during idle time.
-    cron_task: asyncio.Task | None = None
-    config = get_app_config()
-    if config.chat.agent_name == "rag":
-        embedding_client = get_embedding_client()
-        cron_task = asyncio.create_task(
-            embedding_cron_loop(embedding_client),
-            name="embedding-cron",
-        )
-        logger.info("Embedding cron started (interval=%ds)", config.rag.cron_interval)
-
     yield
-
-    # Shutdown logic
     logger.info("Shutting down Chatty application...")
-
-    if cron_task is not None:
-        cron_task.cancel()
-        try:
-            await cron_task
-        except asyncio.CancelledError:
-            pass
-        logger.info("Embedding cron stopped.")
-
-    await get_inbox().aclose()
-    await get_model_semaphore().aclose()
-    if redis_client is not None:
-        await redis_client.aclose()
 
 
 def _build_api_prefix(route_prefix: str) -> str:
-    """Build the API prefix from the configurable route prefix.
-
-    Result is ``/api/v1/<route_prefix>`` when *route_prefix* is non-empty,
-    otherwise just ``/api/v1``.
-    """
     base = "/api/v1"
     if route_prefix:
         return f"{base}/{route_prefix.strip('/')}"
@@ -86,31 +54,29 @@ def get_app() -> FastAPI:
 
     app = FastAPI(
         title="Chatty",
-        description="A persona-driven chatbot with multi-agent pipeline",
+        description=(
+            "A persona-driven chatbot with multi-agent pipeline"
+        ),
         version="0.1.0",
         lifespan=lifespan,
     )
 
-    # TODO: Customize CORS middleware
-    #
-    # app.add_middleware(
-    #     CORSMiddleware,
-    #     allow_origins=["*"],  # Configure appropriately for production
-    #     allow_credentials=True,
-    #     allow_methods=["*"],
-    #     allow_headers=["*"],
-    # )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-    # Include routers with configurable prefix
     api_prefix = _build_api_prefix(config.api.route_prefix)
     app.include_router(chat_router, prefix=api_prefix)
+    app.include_router(health_router)
 
-    app.get("/health")(lambda: "ok")
-
-    # OpenTelemetry — instruments FastAPI + httpx; no-op if tracing is disabled.
-    init_telemetry(app, config.tracing)
-
-    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+    init_telemetry(app)
+    Instrumentator().instrument(app).expose(
+        app, endpoint="/metrics"
+    )
 
     return app
 

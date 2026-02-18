@@ -13,6 +13,7 @@ lineage.
 Usage::
 
     callback = PGMessageCallback(
+        session_factory=session_factory,
         conversation_id="conv_a8Kx3nQ9mP2r",
         trace_id="trace_L7wBd4Fj9Ks2",
         model_name="gpt-3.5-turbo",
@@ -31,25 +32,25 @@ from uuid import UUID
 from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.outputs import LLMResult
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chatty.infra.id_utils import generate_id
 
-from .engine import get_async_session_factory
 from .models import (
-    AIExtra,
     EXTRA_MODEL_NAME,
     EXTRA_PARENT_RUN_ID,
     EXTRA_RUN_ID,
     EXTRA_TOOL_CALL_ID,
     EXTRA_TOOL_CALLS,
     EXTRA_TOOL_NAME,
-    ChatMessage,
-    PromptExtra,
-    Role,
     ROLE_AI,
     ROLE_HUMAN,
     ROLE_SYSTEM,
     ROLE_TOOL,
+    AIExtra,
+    ChatMessage,
+    PromptExtra,
+    Role,
     StoredToolCall,
     ToolExtra,
 )
@@ -63,6 +64,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _insert(
+    factory: async_sessionmaker[AsyncSession],
     *,
     conversation_id: str,
     trace_id: str,
@@ -73,13 +75,11 @@ async def _insert(
 ) -> None:
     """Insert a single ``ChatMessage`` row.
 
-    Acquires a session from the singleton factory, commits, and
-    closes.  All exceptions are caught and logged — the caller is
-    never interrupted.
+    All exceptions are caught and logged — the caller is never
+    interrupted.
     """
     try:
-        session_factory = get_async_session_factory()
-        async with session_factory() as session:
+        async with factory() as session:
             msg = ChatMessage(
                 conversation_id=conversation_id,
                 trace_id=trace_id,
@@ -122,8 +122,8 @@ def _make_prompt_extra(
 class PGMessageCallback(AsyncCallbackHandler):
     """Records every LangChain message to PostgreSQL.
 
-    Created per-request and passed to
-    ``graph.astream(config={"callbacks": [cb]})``.
+    Created per-request with an explicit ``session_factory`` and
+    passed to ``graph.astream(config={"callbacks": [cb]})``.
 
     Hooks used:
 
@@ -137,11 +137,13 @@ class PGMessageCallback(AsyncCallbackHandler):
 
     def __init__(
         self,
+        session_factory: async_sessionmaker[AsyncSession],
         conversation_id: str,
         trace_id: str,
         model_name: str | None = None,
     ) -> None:
         super().__init__()
+        self._session_factory = session_factory
         self.conversation_id = conversation_id
         self.trace_id = trace_id
         self.model_name = model_name
@@ -159,7 +161,7 @@ class PGMessageCallback(AsyncCallbackHandler):
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> None:
-        """Store the system prompt and human message on the first LLM call."""
+        """Store the system prompt and human message on first LLM call."""
         if self._initial_saved:
             return
 
@@ -180,11 +182,16 @@ class PGMessageCallback(AsyncCallbackHandler):
             extra = _make_prompt_extra(run_id, parent_run_id)
 
             await _insert(
+                self._session_factory,
                 conversation_id=self.conversation_id,
                 trace_id=self.trace_id,
                 message_id=msg_id,
                 role=role,
-                content=msg.content if isinstance(msg.content, str) else None,
+                content=(
+                    msg.content
+                    if isinstance(msg.content, str)
+                    else None
+                ),
                 extra=extra,
             )
 
@@ -200,15 +207,13 @@ class PGMessageCallback(AsyncCallbackHandler):
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> None:
-        """Store the AI message (tool-call decision or final answer).
-
-        Uses ``ai_msg.id`` from the provider (OpenAI ``chatcmpl-xxx``)
-        as the ``message_id``.
-        """
+        """Store the AI message (tool-call decision or final answer)."""
         try:
             ai_msg = response.generations[0][0].message
         except (IndexError, AttributeError):
-            logger.debug("on_llm_end: could not extract AI message, skipping.")
+            logger.debug(
+                "on_llm_end: could not extract AI message, skipping."
+            )
             return
 
         msg_id = ai_msg.id or generate_id("msg")
@@ -220,17 +225,24 @@ class PGMessageCallback(AsyncCallbackHandler):
             extra[EXTRA_MODEL_NAME] = self.model_name
         if ai_msg.tool_calls:
             extra[EXTRA_TOOL_CALLS] = [
-                StoredToolCall(name=tc["name"], args=tc["args"], id=tc["id"])
+                StoredToolCall(
+                    name=tc["name"], args=tc["args"], id=tc["id"]
+                )
                 for tc in ai_msg.tool_calls
             ]
 
         content = ai_msg.content
         await _insert(
+            self._session_factory,
             conversation_id=self.conversation_id,
             trace_id=self.trace_id,
             message_id=msg_id,
             role=ROLE_AI,
-            content=content if isinstance(content, str) and content else None,
+            content=(
+                content
+                if isinstance(content, str) and content
+                else None
+            ),
             extra=extra,
         )
 
@@ -258,7 +270,11 @@ class PGMessageCallback(AsyncCallbackHandler):
     ) -> None:
         """Store the tool result message."""
         name = self._tool_names.pop(run_id, "unknown")
-        content = str(output.content) if hasattr(output, "content") else str(output)
+        content = (
+            str(output.content)
+            if hasattr(output, "content")
+            else str(output)
+        )
 
         msg_id = generate_id("msg")
 
@@ -272,6 +288,7 @@ class PGMessageCallback(AsyncCallbackHandler):
             extra[EXTRA_TOOL_CALL_ID] = output.tool_call_id
 
         await _insert(
+            self._session_factory,
             conversation_id=self.conversation_id,
             trace_id=self.trace_id,
             message_id=msg_id,

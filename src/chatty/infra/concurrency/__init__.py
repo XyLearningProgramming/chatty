@@ -20,8 +20,8 @@ Two concrete backends are provided for each layer:
 """
 
 from .base import AcquireTimeout, ClientDisconnected, InboxFull
-from .inbox import Inbox, get_inbox
-from .semaphore import ModelSemaphore, get_model_semaphore
+from .inbox import Inbox, build_inbox, get_inbox
+from .semaphore import ModelSemaphore, build_semaphore, get_model_semaphore
 
 __all__ = [
     "AcquireTimeout",
@@ -29,6 +29,8 @@ __all__ = [
     "Inbox",
     "InboxFull",
     "ModelSemaphore",
+    "build_inbox",
+    "build_semaphore",
     "get_inbox",
     "get_model_semaphore",
 ]

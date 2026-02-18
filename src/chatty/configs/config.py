@@ -58,7 +58,7 @@ DOTENV_FILE_PATH = PROJECT_ROOT / ".env"
 ENV_DELIMITER = "__"  # Nested environment variable delimiter
 ENV_PREFIX = "CHATTY_"  # Environment variable prefix for Chatty
 
-DEFUALT_ENCODING = "utf-8"
+DEFAULT_ENCODING = "utf-8"
 
 
 # ---------------------------------------------------------------------------
@@ -71,13 +71,13 @@ class AppConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_file=DOTENV_FILE_PATH,
-        env_file_encoding=DEFUALT_ENCODING,
+        env_file_encoding=DEFAULT_ENCODING,
         env_nested_delimiter=ENV_DELIMITER,
         env_prefix=ENV_PREFIX,
         case_sensitive=False,
         extra="ignore",
         yaml_file=STATIC_CONFIG_FILE,
-        yaml_file_encoding=DEFUALT_ENCODING,
+        yaml_file_encoding=DEFAULT_ENCODING,
     )
 
     third_party: ThirdPartyConfig = Field(
@@ -174,7 +174,7 @@ class _PromptYamlSettingsSource(PydanticBaseSettingsSource):
             return {}
 
         try:
-            with open(PROMPT_CONFIG_FILE, encoding=DEFUALT_ENCODING) as f:
+            with open(PROMPT_CONFIG_FILE, encoding=DEFAULT_ENCODING) as f:
                 data = yaml.safe_load(f)
                 if data and "system_prompt" in data:
                     return {"prompt": {"system_prompt": data["system_prompt"]}}
@@ -191,3 +191,28 @@ def get_app_config() -> AppConfig:
     picked up immediately.
     """
     return AppConfig()
+
+
+# ---------------------------------------------------------------------------
+# Sub-config accessors for use with ``Depends()``
+# ---------------------------------------------------------------------------
+
+
+def get_llm_config() -> LLMConfig:
+    """Return the LLM sub-config (re-read from disk)."""
+    return get_app_config().llm
+
+
+def get_api_config() -> APIConfig:
+    """Return the API sub-config (re-read from disk)."""
+    return get_app_config().api
+
+
+def get_chat_config() -> ChatConfig:
+    """Return the chat sub-config (re-read from disk)."""
+    return get_app_config().chat
+
+
+def get_embedding_config() -> EmbeddingConfig:
+    """Return the embedding sub-config (re-read from disk)."""
+    return get_app_config().embedding

@@ -3,16 +3,15 @@
 from abc import abstractmethod
 from typing import Any, Protocol, Self
 
-from chatty.configs.persona import KnowledgeSection
+from chatty.configs.persona import KnowledgeSource, ToolDeclaration
 
 
 class ToolBuilder(Protocol):
-    """Protocol for tool builders that can create tools from config.
+    """Protocol for tool builders that create tools from config.
 
     Each concrete builder handles one ``tool_type`` (e.g. ``'url'``).
-    The registry filters ``persona.sections`` by convention and calls
-    ``from_sections`` once per group to produce a **single dispatcher
-    tool** that the model sees.
+    The registry calls ``from_declaration`` once per tool entry to
+    produce a single dispatcher tool that the model sees.
     """
 
     @property
@@ -22,20 +21,23 @@ class ToolBuilder(Protocol):
 
     @classmethod
     @abstractmethod
-    def from_sections(
+    def from_declaration(
         cls,
-        sections: list[KnowledgeSection],
+        declaration: ToolDeclaration,
+        sources: dict[str, KnowledgeSource],
         *,
         processors: dict[str, list[Any]] | None = None,
     ) -> Self:
-        """Build a single dispatcher tool from knowledge sections.
+        """Build a single dispatcher tool from a tool declaration.
 
         Parameters
         ----------
-        sections:
-            ``KnowledgeSection`` entries matching this builder's type
-            (e.g. sections with ``source_url`` for the URL builder).
+        declaration:
+            The ``ToolDeclaration`` entry from persona config.
+        sources:
+            Full ``persona.sources`` dict for resolving source ids.
         processors:
-            Mapping of section title to resolved ``Processor`` instances.
+            Mapping of source id to resolved ``Processor`` instances
+            (source-level + action-level merged).
         """
         ...

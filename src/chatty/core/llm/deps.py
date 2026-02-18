@@ -6,24 +6,17 @@ from fastapi import Depends
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
-from chatty.configs.config import get_app_config
+from chatty.configs.config import get_llm_config
 from chatty.configs.system import LLMConfig
-from chatty.infra.concurrency.semaphore import get_model_semaphore
+from chatty.infra.concurrency.semaphore import ModelSemaphore, get_model_semaphore
 
 from .gated import GatedChatModel
 
 
 def get_llm(
-    config: Annotated[LLMConfig, Depends(lambda: get_app_config().llm)],
+    config: Annotated[LLMConfig, Depends(get_llm_config)],
 ) -> ChatOpenAI:
-    """Create and return a raw ChatOpenAI instance.
-
-    Args:
-        config: LLMConfig instance containing LLM configuration parameters
-
-    Returns:
-        ChatOpenAI instance configured with the provided settings
-    """
+    """Create and return a raw ChatOpenAI instance."""
     return ChatOpenAI(
         base_url=config.endpoint,
         api_key=config.api_key,
@@ -40,6 +33,7 @@ def get_llm(
 
 def get_gated_llm(
     llm: Annotated[BaseChatModel, Depends(get_llm)],
+    semaphore: Annotated[ModelSemaphore, Depends(get_model_semaphore)],
 ) -> GatedChatModel:
     """Wrap the base LLM with per-invocation concurrency gating.
 
@@ -47,4 +41,4 @@ def get_gated_llm(
     around every ``_agenerate`` / ``_astream`` call, giving
     AI-gateway-style concurrency control on the model itself.
     """
-    return GatedChatModel(inner=llm, semaphore=get_model_semaphore())
+    return GatedChatModel(inner=llm, semaphore=semaphore)

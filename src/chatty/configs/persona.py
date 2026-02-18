@@ -1,104 +1,94 @@
-"""Persona configuration models.
+"""Persona configuration.
 
-Persona describes the author's identity -- name, character traits,
-areas of expertise, and knowledge sections.
+Persona describes the author's identity and three layers of knowledge
+config: sources (content acquisition), tools (agent actions), and
+embed (RAG). This module is the single entry point; supporting types
+live in persona_processors, persona_sources, and persona_actions.
 
-Knowledge sections are the single source of truth for all persona
-knowledge.  Each chat service interprets them differently:
+Re-exports all persona types so callers can use::
 
-- OneStep (tool-calling agent): sections with ``source_url`` are
-  auto-derived into URL tools.
-- RAG (retrieval): all sections are embedded for similarity search.
+    from chatty.configs.persona import PersonaConfig, KnowledgeSource, ...
 """
 
-from typing import Any
+from __future__ import annotations
 
 from jinja2 import Template
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from .persona_actions import EmbedDeclaration, ToolDeclaration
+from .persona_processors import (
+    ProcessorRef,
+    ProcessorWithArgs,
+    processor_ref_name,
+)
+from .persona_sources import KnowledgeSource
 
-class KnowledgeSection(BaseModel):
-    """A knowledge section owned by the persona.
-
-    Sections can carry inline ``content``, a ``source_url`` to fetch
-    from, or both.  The ``description`` is optional -- if empty, it
-    will be auto-generated when used as a tool description.
-
-    Attributes:
-        title: Section name (also used as tool name for OneStep).
-        description: Optional human-written description.  When empty,
-            an auto-generated description is used for tool binding.
-        content: Inline text knowledge.
-        source_url: URL to fetch content from (fetched by cron /
-            at startup and used for both tools and RAG embedding).
-        processors: Ordered post-processing steps applied to fetched
-            content (e.g. ``'html_head_title_meta'``).
-        args: Extra arguments forwarded to the tool builder
-            (e.g. ``max_content_length``).
-    """
-
-    title: str = Field(..., description="Section name")
-    description: str = Field(
-        default="",
-        description="Optional description; auto-generated if empty",
-    )
-    content: str = Field(
-        default="",
-        description="Inline text knowledge",
-    )
-    source_url: str = Field(
-        default="",
-        description="URL to fetch content from",
-    )
-    processors: list[str] = Field(
-        default_factory=list,
-        description="Ordered post-processing steps for fetched content",
-    )
-    args: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Extra args forwarded to the tool builder",
-    )
-
-
-# ---------------------------------------------------------------------------
-# System prompt construction
-# ---------------------------------------------------------------------------
+__all__ = [
+    "EmbedDeclaration",
+    "KnowledgeSource",
+    "PersonaConfig",
+    "ProcessorRef",
+    "ProcessorWithArgs",
+    "ToolDeclaration",
+    "processor_ref_name",
+]
 
 
 class PersonaConfig(BaseModel):
-    """Author persona configuration (identity + knowledge)."""
+    """Author persona configuration (identity + knowledge layers)."""
 
     name: str = Field(description="Author's name")
     character: list[str] = Field(
         default_factory=list,
-        description="Key characteristics of the author, "
-        "provided to system prompt",
+        description="Key characteristics of the author",
     )
     expertise: list[str] = Field(
         default_factory=list,
-        description="Author's areas of expertise, "
-        "provided to system prompt",
+        description="Author's areas of expertise",
     )
-    sections: list[KnowledgeSection] = Field(
+
+    sources: dict[str, KnowledgeSource] = Field(
+        default_factory=dict,
+        description="Knowledge sources keyed by id",
+    )
+    tools: list[ToolDeclaration] = Field(
         default_factory=list,
-        description="Knowledge sections -- single source of truth for "
-        "persona knowledge.  Each chat service interprets them "
-        "differently by convention.",
+        description="Tools exposed to the agent",
     )
+    embed: list[EmbedDeclaration] = Field(
+        default_factory=list,
+        description="Embed actions for RAG retrieval",
+    )
+
+    @model_validator(mode="after")
+    def _validate_references(self) -> PersonaConfig:
+        """Ensure all tool and embed references point to real sources."""
+        source_ids = set(self.sources)
+
+        for tool in self.tools:
+            unknown = set(tool.sources) - source_ids
+            if unknown:
+                raise ValueError(
+                    f"Tool '{tool.name}' references unknown "
+                    f"sources: {unknown}"
+                )
+
+        for entry in self.embed:
+            if entry.source not in source_ids:
+                raise ValueError(
+                    f"Embed references unknown source: "
+                    f"'{entry.source}'"
+                )
+
+        return self
 
     def build_system_prompt(self, system_prompt_template: str) -> str:
         """Render the system prompt from persona fields.
 
-        Renders the provided Jinja2 template with persona fields (name,
-        character, expertise). Default values are handled by the template
-        engine itself.
-
         Args:
-            system_prompt_template: Jinja2 template string from PromptConfig.
+            system_prompt_template: Jinja2 template string.
 
-        Returns a ready-to-use string that can be passed as the system
-        message to an LLM.  Callers do not need to know about the
-        internal field layout.
+        Returns a ready-to-use system message string.
         """
         if not system_prompt_template:
             raise ValueError(

@@ -1,36 +1,35 @@
 """Tool registry for LangGraph agents.
 
-Tools are **derived from ``persona.sections``** by convention.  Sections
-with a ``source_url`` become URL tools automatically.  The registry
-re-reads the persona config on every ``get_tools()`` call so that
-ConfigMap updates are picked up without a redeploy.
+Tools are built from ``persona.tools`` declarations.  Each declaration
+references sources by id and specifies an optional action-level
+processor chain.  The registry merges source-level and action-level
+processors, then delegates to the matching ``ToolBuilder``.
 """
 
 import asyncio
 import functools
 import logging
 from datetime import timedelta
-from typing import Any, Type
+from typing import Annotated, Any, Type
 
+from fastapi import Depends
 from langchain_core.tools import BaseTool
 
-from chatty.configs.config import get_app_config
-from chatty.configs.persona import KnowledgeSection
-from chatty.infra import singleton
+from chatty.configs.config import AppConfig, get_app_config
+from chatty.configs.persona import (
+    KnowledgeSource,
+    ToolDeclaration,
+)
 
 from .model import ToolBuilder
-from .processors import HtmlHeadTitleMeta, Processor
+from .processors import Processor, resolve_processors
 from .url_tool import URLDispatcherTool
 
 logger = logging.getLogger(__name__)
 
 
 def _apply_timeout(tool: BaseTool, timeout: timedelta) -> BaseTool:
-    """Wrap a tool's ``_arun`` and ``_run`` with a per-invocation timeout.
-
-    The wrapper is monkey-patched onto the *instance*, so it sits on top
-    of any previously applied processors.
-    """
+    """Wrap a tool's ``_arun`` with a per-invocation timeout."""
     seconds = timeout.total_seconds()
     original_arun = tool._arun
 
@@ -44,110 +43,108 @@ def _apply_timeout(tool: BaseTool, timeout: timedelta) -> BaseTool:
 
 
 class ToolRegistry:
-    """Registry that derives tools from ``persona.sections``.
+    """Registry that builds tools from persona tool declarations.
 
-    Sections with ``source_url`` are treated as URL tools.  Each builder
-    receives the matching sections and produces a single dispatcher tool.
-
-    When constructed with explicit *sections* (useful in tests), tools
-    are eagerly built and cached.  Otherwise ``get_tools()`` re-reads
-    config via ``get_app_config()`` on every call so that ConfigMap
-    updates are reflected immediately.
+    Receives the full ``PersonaConfig`` (or tools + sources) and
+    ``tool_timeout`` at construction time.  Tests can pass these
+    directly.
     """
 
     _known_tools: dict[str, Type[ToolBuilder]] = {
         cls.tool_type: cls for cls in [URLDispatcherTool]
     }
-    _known_processors: dict[str, Type[Processor]] = {
-        cls.processor_name: cls for cls in [HtmlHeadTitleMeta]
-    }
 
     def __init__(
-        self, sections: list[KnowledgeSection] | None = None
+        self,
+        tools: list[ToolDeclaration],
+        sources: dict[str, KnowledgeSource],
+        tool_timeout: timedelta,
     ) -> None:
-        """Create a registry, optionally with fixed sections for testing."""
-        self._tools: list[BaseTool] | None = None
-        if sections is not None:
-            self._tools = self._build_tools(sections)
+        self._tools = self._build_tools(tools, sources)
+        for tool in self._tools:
+            _apply_timeout(tool, tool_timeout)
 
     def get_tools(self) -> list[BaseTool]:
-        """Build and return tools from the latest persona config.
-
-        Each tool is wrapped with the global ``tool_timeout`` from
-        ``ChatConfig`` so that no single invocation can run forever.
-        """
-        if self._tools is not None:
-            return list(self._tools)
-
-        app_config = get_app_config()
-        sections = app_config.persona.sections
-        tools = self._build_tools(sections)
-        for tool in tools:
-            _apply_timeout(tool, app_config.chat.tool_timeout)
-        return tools
+        """Return the built tools."""
+        return list(self._tools)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _sections_with_url(
-        sections: list[KnowledgeSection],
-    ) -> list[KnowledgeSection]:
-        """Filter sections that have a ``source_url`` (→ URL tools)."""
-        return [s for s in sections if s.source_url]
-
     def _build_tools(
-        self, sections: list[KnowledgeSection]
+        self,
+        declarations: list[ToolDeclaration],
+        sources: dict[str, KnowledgeSource],
     ) -> list[BaseTool]:
-        """Build tools from persona knowledge sections.
+        """Build tools from persona tool declarations."""
+        tools: list[BaseTool] = []
 
-        Currently only the ``url`` tool type is supported.  All
-        sections with ``source_url`` are grouped into a single URL
-        dispatcher.
-        """
-        url_sections = self._sections_with_url(sections)
-        if not url_sections:
-            return []
-
-        tool_builder = self._known_tools.get("url")
-        if not tool_builder:
-            raise NotImplementedError("Tool type 'url' is not supported.")
-
-        # Resolve processors per section title
-        resolved_processors: dict[str, list[Any]] = {}
-        for section in url_sections:
-            if section.processors:
-                resolved_processors[section.title] = (
-                    self._resolve_processors(section.processors)
-                )
-
-        tool = tool_builder.from_sections(
-            url_sections,
-            processors=resolved_processors if resolved_processors else None,
-        )
-        return [tool]
-
-    def _resolve_processors(
-        self, processor_names: list[str]
-    ) -> list[Processor]:
-        """Map processor names to instantiated ``Processor`` objects."""
-        processors: list[Processor] = []
-        for name in processor_names:
-            processor_class = self._known_processors.get(name)
-            if not processor_class:
+        for decl in declarations:
+            tool_builder = self._known_tools.get(decl.type)
+            if not tool_builder:
                 raise NotImplementedError(
-                    f"Processor '{name}' is not supported."
+                    f"Tool type '{decl.type}' is not supported."
                 )
-            processors.append(processor_class())
-        return processors
+
+            merged_processors = self._merge_processors(decl, sources)
+
+            tool = tool_builder.from_declaration(
+                decl,
+                sources,
+                processors=(
+                    merged_processors if merged_processors else None
+                ),
+            )
+            tools.append(tool)
+
+        return tools
+
+    @staticmethod
+    def _merge_processors(
+        decl: ToolDeclaration,
+        sources: dict[str, KnowledgeSource],
+    ) -> dict[str, list[Any]]:
+        """Merge source-level and action-level processors per source id.
+
+        Returns a mapping of source_id -> list of resolved Processor
+        instances (source processors first, then action processors).
+        """
+        action_procs: list[Processor] = []
+        if decl.processors:
+            action_procs = resolve_processors(decl.processors)
+
+        merged: dict[str, list[Any]] = {}
+        for source_id in decl.sources:
+            source = sources[source_id]
+            chain: list[Processor] = []
+
+            if source.processors:
+                chain.extend(resolve_processors(source.processors))
+
+            chain.extend(action_procs)
+
+            if chain:
+                merged[source_id] = chain
+
+        return merged
 
 
-@singleton
-def get_tool_registry() -> ToolRegistry:
-    """Get the global tool registry singleton.
+# ---------------------------------------------------------------------------
+# FastAPI dependency
+# ---------------------------------------------------------------------------
 
-    The registry itself is a singleton, but it reads fresh sections
-    via ``get_app_config()`` on every ``get_tools()`` call.
+
+def get_tool_registry(
+    config: Annotated[AppConfig, Depends(get_app_config)],
+) -> ToolRegistry:
+    """Build a ``ToolRegistry`` from the latest config.
+
+    Config is injected via ``Depends(get_app_config)`` so there are
+    no hidden lookups and the dependency can be overridden in tests.
     """
-    return ToolRegistry()
+    return ToolRegistry(
+        tools=config.persona.tools,
+        sources=config.persona.sources,
+        tool_timeout=config.chat.tool_timeout,
+    )

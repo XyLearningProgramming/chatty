@@ -35,6 +35,24 @@ def test_singleton_get_app_config():
     assert config1 is config2
     assert isinstance(config1, AppConfig)
 
-    # Verify persona loaded from separate file
+    # Verify persona loaded from YAML
     assert config1.persona.name == "Xinyu Huang"
     assert "chatty" in config1.persona.character
+
+    # Verify new sources structure loaded
+    assert "current_homepage" in config1.persona.sources
+    assert "resume" in config1.persona.sources
+    assert (
+        config1.persona.sources["current_homepage"].content_url
+        == "https://x3huang.dev"
+    )
+
+    # Verify tools loaded
+    assert len(config1.persona.tools) == 1
+    assert config1.persona.tools[0].name == "lookup"
+    assert "current_homepage" in config1.persona.tools[0].sources
+
+    # Verify embed loaded
+    assert len(config1.persona.embed) == 2
+    assert config1.persona.embed[0].source == "current_homepage"
+    assert len(config1.persona.embed[0].match_hints) > 0

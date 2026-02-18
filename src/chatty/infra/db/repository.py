@@ -15,8 +15,8 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from .engine import get_async_session_factory
 from .models import (
     EXTRA_TOOL_CALL_ID,
     EXTRA_TOOL_CALLS,
@@ -32,25 +32,20 @@ logger = logging.getLogger(__name__)
 
 
 async def load_conversation_history(
+    session_factory: async_sessionmaker[AsyncSession],
     conversation_id: str,
     max_messages: int,
 ) -> list[BaseMessage]:
     """Load recent messages from a conversation, oldest-first.
 
-    Fetches the most recent non-system messages ordered by
-    ``created_at`` and converts them to LangChain message objects.
-
     Args:
+        session_factory: Async session maker injected by the caller.
         conversation_id: The prefixed conversation ID (``conv_xxx``).
         max_messages: Maximum number of messages to return.
 
     Returns:
         Ordered list of ``BaseMessage`` instances (oldest first).
     """
-    session_factory = get_async_session_factory()
-
-    # Grab the N most recent non-system rows (newest first),
-    # then reverse in Python to get oldest-first ordering.
     query = text("""
         SELECT message_id, role, content, extra
         FROM chat_messages
@@ -64,7 +59,11 @@ async def load_conversation_history(
         async with session_factory() as session:
             result = await session.execute(
                 query,
-                {"cid": conversation_id, "system_role": ROLE_SYSTEM, "lim": max_messages},
+                {
+                    "cid": conversation_id,
+                    "system_role": ROLE_SYSTEM,
+                    "lim": max_messages,
+                },
             )
             rows = result.fetchall()
     except Exception:
@@ -75,7 +74,11 @@ async def load_conversation_history(
         )
         return []
 
-    return [msg for row in reversed(rows) if (msg := _row_to_message(row)) is not None]
+    return [
+        msg
+        for row in reversed(rows)
+        if (msg := _row_to_message(row)) is not None
+    ]
 
 
 def _row_to_message(row: Any) -> BaseMessage | None:
@@ -95,10 +98,14 @@ def _row_to_message(row: Any) -> BaseMessage | None:
         tool_calls: list[StoredToolCall] = []
         if extra and EXTRA_TOOL_CALLS in extra:
             tool_calls = [
-                StoredToolCall(name=tc["name"], args=tc["args"], id=tc["id"])
+                StoredToolCall(
+                    name=tc["name"], args=tc["args"], id=tc["id"]
+                )
                 for tc in extra[EXTRA_TOOL_CALLS]
             ]
-        return AIMessage(content=content, id=message_id, tool_calls=tool_calls)
+        return AIMessage(
+            content=content, id=message_id, tool_calls=tool_calls
+        )
 
     if role == ROLE_TOOL:
         tool_call_id = (extra or {}).get(EXTRA_TOOL_CALL_ID, "")

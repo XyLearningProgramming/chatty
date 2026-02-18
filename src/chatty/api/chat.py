@@ -2,31 +2,28 @@
 
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from chatty.configs.config import get_app_config
-from chatty.configs.system import APIConfig, ChatConfig
-from chatty.core.service import (
-    ChatService,
-    get_chat_service,
-)
 from chatty.core.service.models import (
     ChatContext,
     DequeuedEvent,
     QueuedEvent,
     StreamEvent,
 )
-from chatty.infra.concurrency import (
-    InboxFull,
-    get_inbox,
-)
+from chatty.infra.concurrency import InboxFull
 from chatty.infra.db import load_conversation_history
 from chatty.infra.id_utils import generate_id
 from chatty.infra.telemetry import get_current_trace_id
 
+from .deps import (
+    APIConfigDep,
+    ChatConfigDep,
+    ChatServiceDep,
+    InboxDep,
+    SessionFactoryDep,
+)
 from .models import ChatRequest
 from .streaming import sse_stream
 
@@ -36,19 +33,15 @@ STREAMING_RESPONSE_MEDIA_TYPE = "text/plain"
 STREAMING_RESPONSE_HEADERS = {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
-    "Access-Control-Allow-Headers": "Cache-Control, X-Chatty-Trace, X-Chatty-Conversation",
-    "Access-Control-Expose-Headers": "X-Chatty-Trace, X-Chatty-Conversation",
+    "Access-Control-Allow-Headers": (
+        "Cache-Control, X-Chatty-Trace, X-Chatty-Conversation"
+    ),
+    "Access-Control-Expose-Headers": (
+        "X-Chatty-Trace, X-Chatty-Conversation"
+    ),
 }
 
 router = APIRouter(tags=["chat"])
-
-
-def _get_api_config() -> APIConfig:
-    return get_app_config().api
-
-
-def _get_chat_config() -> ChatConfig:
-    return get_app_config().chat
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +51,7 @@ def _get_chat_config() -> ChatConfig:
 
 async def _chat_events(
     ctx: ChatContext,
-    service: ChatService,
+    service: ChatServiceDep,
     position: int,
     is_disconnected: Callable[[], Awaitable[bool]],
 ) -> AsyncGenerator[StreamEvent, None]:
@@ -91,9 +84,11 @@ async def _chat_events(
 async def chat(
     request: Request,
     chat_request: ChatRequest,
-    chat_service: Annotated[ChatService, Depends(get_chat_service)],
-    api_config: Annotated[APIConfig, Depends(_get_api_config)],
-    chat_config: Annotated[ChatConfig, Depends(_get_chat_config)],
+    chat_service: ChatServiceDep,
+    api_config: APIConfigDep,
+    chat_config: ChatConfigDep,
+    inbox: InboxDep,
+    session_factory: SessionFactoryDep,
 ) -> StreamingResponse | JSONResponse:
     """Process a chat request and return a streaming response.
 
@@ -119,8 +114,6 @@ async def chat(
 
     Returns **429** when the inbox is full.
     """
-    inbox = get_inbox()
-
     # Admission control — reject early with a proper HTTP status code.
     try:
         position = await inbox.enter()
@@ -138,7 +131,9 @@ async def chat(
     history = []
     if chat_request.conversation_id:
         history = await load_conversation_history(
-            conversation_id, max_messages=chat_config.max_conversation_length
+            session_factory,
+            conversation_id,
+            max_messages=chat_config.max_conversation_length,
         )
 
     ctx = ChatContext(
@@ -147,6 +142,8 @@ async def chat(
         trace_id=trace_id,
         history=history,
     )
+
+    logger.info(f"Started chat streaming with context: {ctx}")
 
     return StreamingResponse(
         sse_stream(

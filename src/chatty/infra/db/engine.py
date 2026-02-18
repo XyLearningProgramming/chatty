@@ -1,41 +1,68 @@
-"""Async SQLAlchemy engine and session factory singletons.
+"""Async SQLAlchemy engine and session factory.
 
-Follows the same singleton pattern as ``chatty.infra.redis``.  The
-engine is created lazily on first call and cached for the process
-lifetime.  Callers are responsible for calling ``engine.dispose()``
-on shutdown (wired through the FastAPI lifespan in ``app.py``).
+``build_db`` is a lifespan dependency: it creates the engine +
+session factory, attaches them to ``app.state``, and disposes the
+engine on shutdown.  Per-request dependencies read from ``app.state``.
 """
 
+from collections.abc import AsyncGenerator
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Request
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
+    AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
-from chatty.configs.config import get_app_config
-from chatty.infra.singleton import singleton
+from chatty.configs.config import AppConfig, get_app_config
+from chatty.infra.lifespan import get_app
 
 
-@singleton
-def get_async_engine() -> AsyncEngine:
-    """Create and cache an ``AsyncEngine`` from application config.
+# ---------------------------------------------------------------------------
+# Lifespan dependency
+# ---------------------------------------------------------------------------
 
-    Uses the ``postgresql+asyncpg://`` URI from
-    ``ThirdPartyConfig.postgres_uri``.  The engine is **not** connected
-    until the first query; call ``await engine.connect()`` or run a
-    statement to verify reachability.
-    """
-    third_party_config = get_app_config().third_party
-    return create_async_engine(
-        third_party_config.postgres_uri,
+
+async def build_db(
+    app: Annotated[FastAPI, Depends(get_app)],
+    config: Annotated[AppConfig, Depends(get_app_config)],
+) -> AsyncGenerator[None, None]:
+    """Create engine + session factory, attach to ``app.state``."""
+    tp = config.third_party
+    engine = create_async_engine(
+        tp.postgres_uri,
         pool_pre_ping=True,
-        pool_size=third_party_config.postgres_pool_size,
-        max_overflow=third_party_config.postgres_max_overflow,
+        pool_size=tp.postgres_pool_size,
+        max_overflow=tp.postgres_max_overflow,
     )
+    factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
+        engine, expire_on_commit=False
+    )
+    app.state.engine = engine
+    app.state.session_factory = factory
+    yield
+    await engine.dispose()
 
 
-@singleton
-def get_async_session_factory() -> async_sessionmaker:
-    """Create and cache an ``async_sessionmaker`` bound to the engine."""
-    engine = get_async_engine()
-    return async_sessionmaker(engine, expire_on_commit=False)
+# ---------------------------------------------------------------------------
+# Per-request dependencies — read from app.state
+# ---------------------------------------------------------------------------
+
+
+def get_session_factory(
+    request: Request,
+) -> async_sessionmaker[AsyncSession]:
+    """Return the ``async_sessionmaker`` from ``app.state``."""
+    return request.app.state.session_factory
+
+
+async def get_async_session(
+    request: Request,
+) -> AsyncGenerator[AsyncSession, None]:
+    """Yield one ``AsyncSession`` per request, auto-closed on exit."""
+    factory: async_sessionmaker[AsyncSession] = (
+        request.app.state.session_factory
+    )
+    async with factory() as session:
+        yield session

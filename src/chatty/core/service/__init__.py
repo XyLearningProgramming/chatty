@@ -1,3 +1,2 @@
-from .base import *  # noqa: F401, F403
-from .dependency import *  # noqa: F401, F403
-from .models import *  # noqa: F401, F403
+from .deps import get_chat_service  # noqa: F401
+from .models import ChatService  # noqa: F401

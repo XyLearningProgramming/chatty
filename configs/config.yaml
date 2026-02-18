@@ -23,8 +23,8 @@ llm:
 
 # --- Third-party (all secrets – inject via env) ---
 # third_party:
-#   postgres_uri: "postgresql+asyncpg://app:password@localhost:5432/app"
-#   redis_uri: "redis://:password@localhost:6379/0"
+#   postgres_uri: "postgresql+asyncpg://app:devsecret@localhost:5432/app"
+#   redis_uri: "redis://:devsecret@localhost:6383/0"
 
 # --- API ---
 api:
@@ -74,9 +74,7 @@ concurrency:
   inbox_max_size: 10
 
 # --- Persona ---
-# Knowledge sections are the single source of truth:
-#   - OneStep: sections with source_url become URL tools automatically
-#   - RAG: all sections are embedded for similarity search
+# Three layers: sources (content), tools (agent actions), embed (RAG).
 persona:
   name: Xinyu Huang
   character:
@@ -88,23 +86,52 @@ persona:
     - llm agent dev
     - web dev
     - devops & k8s
-  sections:
-    - title: current_homepage
-      description: |
-        Fetch Xinyu's personal website meta info.
-        Returns HTML head with title, author, icon URL, description, etc.
-        Use this to answer questions about Xinyu's personal site.
-      source_url: "https://x3huang.dev"
+
+  # Layer 1: Content acquisition
+  sources:
+    current_homepage:
+      description: >
+        Personal website meta info: title, author, icons, description.
+      content_url: "https://x3huang.dev"
+      timeout: 30
       processors:
         - html_head_title_meta
 
-    - title: resume
-      description: |
-        Fetch Xinyu's resume / CV.
-        Returns the full plain-text content of the resume PDF including
-        professional background, skills, and experience.
-        Use this to answer questions about Xinyu's work experience
-        or qualifications.
-      source_url: "https://x3huang.dev/resume"
-      args:
-        max_content_length: 8000
+    resume:
+      description: >
+        Full resume / CV with professional background, skills,
+        and experience.
+      content_url: "https://x3huang.dev/resume"
+      timeout: 30
+
+  # Layer 2: Tool actions (exposed to OneStep agent)
+  tools:
+    - name: lookup
+      type: url_dispatcher
+      sources: [current_homepage, resume]
+      processors:
+        - name: truncate
+          max_length: 4000
+      description: >
+        Look up external information that you don't already know.
+        Call when the user asks about something that requires
+        live data (e.g. website content, resume details).
+
+  # Layer 3: Embed actions (RAG similarity search)
+  embed:
+    - source: current_homepage
+      match_hints:
+        - "personal website"
+        - "homepage and online presence"
+      processors:
+        - name: truncate
+          max_length: 2000
+
+    - source: resume
+      match_hints:
+        - "work experience and career history"
+        - "programming languages and technical skills"
+        - "education and qualifications"
+      processors:
+        - name: truncate
+          max_length: 3000

@@ -2,6 +2,7 @@
 
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseLanguageModel
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chatty.configs.config import AppConfig
 
@@ -24,8 +25,9 @@ class OneStepChatService(GraphChatService):
         llm: BaseLanguageModel,
         tools_registry: ToolRegistry,
         config: AppConfig,
+        session_factory: async_sessionmaker[AsyncSession],
     ):
-        super().__init__(llm, config)
+        super().__init__(llm, config, session_factory)
         self._tools_registry = tools_registry
 
     async def _create_graph(self, ctx: ChatContext):

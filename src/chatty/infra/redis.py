@@ -1,24 +1,41 @@
-"""Singleton async Redis client.
+"""Async Redis client lifespan dependency.
 
-``Redis.from_url()`` is synchronous (no TCP connection until the first
-command), so it fits the regular ``@singleton`` decorator.  The caller
-is responsible for verifying the connection (e.g. ``await client.ping()``)
-and for closing it on shutdown (``await client.aclose()``).
+``build_redis`` creates a Redis client, verifies the connection, and
+falls back to ``None`` when Redis is unreachable.  Downstream deps
+(inbox, semaphore) declare ``Depends(build_redis)`` to receive the
+shared client.  Cleanup runs automatically via ``yield``.
 """
 
+import logging
+from collections.abc import AsyncGenerator
+from typing import Annotated
+
+from fastapi import Depends
 from redis.asyncio import Redis
 
-from chatty.configs.config import get_app_config
-from chatty.infra.singleton import singleton
+from chatty.configs.config import AppConfig, get_app_config
+
+logger = logging.getLogger(__name__)
 
 
-@singleton
-def get_redis_client() -> Redis:
-    """Create and cache a ``Redis`` client from application config.
+async def build_redis(
+    config: Annotated[AppConfig, Depends(get_app_config)],
+) -> AsyncGenerator[Redis | None, None]:
+    """Create a Redis client; yield ``None`` if unreachable."""
+    client = Redis.from_url(
+        config.third_party.redis_uri, decode_responses=True
+    )
+    verified: Redis | None = None
+    try:
+        await client.ping()
+        verified = client
+    except Exception:
+        logger.warning(
+            "Redis unavailable -- falling back to local "
+            "concurrency."
+        )
 
-    The client is **not** connected yet — the first real command
-    triggers the TCP handshake.  Call ``await client.ping()`` to
-    verify reachability.
-    """
-    uri = get_app_config().third_party.redis_uri
-    return Redis.from_url(uri, decode_responses=True)
+    yield verified
+
+    if verified is not None:
+        await client.aclose()

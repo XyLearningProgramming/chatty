@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from typing import AsyncGenerator
+from typing import Annotated
 
+from fastapi import Depends, FastAPI, Request
 from redis.asyncio import Redis
 
-from chatty.configs.config import get_app_config
-from chatty.infra.singleton import singleton
+from chatty.configs.config import AppConfig, get_app_config
+from chatty.infra.lifespan import get_app
+from chatty.infra.redis import build_redis
 
 from .base import AcquireTimeout, SemaphoreBackend
 from .local_backend import LocalSemaphoreBackend
@@ -76,13 +79,16 @@ class ModelSemaphore:
 
 
 # ---------------------------------------------------------------------------
-# Singleton factory
+# Lifespan dependency
 # ---------------------------------------------------------------------------
 
 
-def _build_semaphore_backend(redis_client: Redis | None) -> SemaphoreBackend:
-    """Choose and construct the right semaphore backend."""
-    config = get_app_config()
+async def build_semaphore(
+    app: Annotated[FastAPI, Depends(get_app)],
+    redis_client: Annotated[Redis | None, Depends(build_redis)],
+    config: Annotated[AppConfig, Depends(get_app_config)],
+) -> AsyncGenerator[None, None]:
+    """Create a ``ModelSemaphore``, attach to ``app.state``; close on shutdown."""
     cc = config.concurrency
     agent_name = config.chat.agent_name
 
@@ -104,25 +110,27 @@ def _build_semaphore_backend(redis_client: Redis | None) -> SemaphoreBackend:
             slots_key,
         )
     else:
-        backend = LocalSemaphoreBackend(max_concurrency=cc.max_concurrency)
+        backend = LocalSemaphoreBackend(
+            max_concurrency=cc.max_concurrency
+        )
         logger.info(
             "ModelSemaphore: local backend (max_concurrency=%d)",
             cc.max_concurrency,
         )
 
-    return backend
-
-
-@singleton
-def get_model_semaphore(redis_client: Redis | None = None) -> ModelSemaphore:
-    """Return (or create) the singleton ``ModelSemaphore``.
-
-    On the **first** call, supply *redis_client* (or ``None`` for the
-    local fallback).  Subsequent calls ignore arguments and return the
-    cached instance.
-    """
-    cc = get_app_config().concurrency
-    return ModelSemaphore(
-        _build_semaphore_backend(redis_client),
-        acquire_timeout=cc.acquire_timeout,
+    semaphore = ModelSemaphore(
+        backend, acquire_timeout=cc.acquire_timeout
     )
+    app.state.semaphore = semaphore
+    yield
+    await semaphore.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Per-request dependency — reads from app.state
+# ---------------------------------------------------------------------------
+
+
+def get_model_semaphore(request: Request) -> ModelSemaphore:
+    """Return the ``ModelSemaphore`` from ``app.state``."""
+    return request.app.state.semaphore

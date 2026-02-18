@@ -8,7 +8,15 @@ class ThirdPartyConfig(BaseModel):
 
     postgres_uri: str = Field(
         default="postgresql+asyncpg://app:password@postgres.db.svc.cluster.local:5432/app",
-        description="PostgreSQL connection URI (asyncpg driver for async FastAPI usage)",
+        description="PostgreSQL connection URI (asyncpg driver)",
+    )
+    postgres_pool_size: int = Field(
+        default=5,
+        description="SQLAlchemy connection pool size",
+    )
+    postgres_max_overflow: int = Field(
+        default=10,
+        description="SQLAlchemy max overflow connections beyond pool_size",
     )
     redis_uri: str = Field(
         default="redis://:password@redis-master.db.svc.cluster.local:6379/0",
