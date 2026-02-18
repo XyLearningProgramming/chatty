@@ -18,9 +18,17 @@ from chatty.configs.config import (
     get_chat_config,
 )
 from chatty.configs.system import APIConfig, ChatConfig
-from chatty.core.service.deps import get_chat_service
+from chatty.core.service.deps import (
+    PgCallbackFactory,
+    get_chat_service,
+    get_pg_callback_factory,
+)
 from chatty.core.service.models import ChatService
 from chatty.infra.concurrency.inbox import Inbox, get_inbox
+from chatty.infra.db import (
+    ChatMessageHistoryFactory,
+    get_chat_message_history_factory,
+)
 from chatty.infra.db.engine import get_async_session, get_session_factory
 
 AppConfigDep = Annotated[AppConfig, Depends(get_app_config)]
@@ -31,4 +39,10 @@ InboxDep = Annotated[Inbox, Depends(get_inbox)]
 AsyncSessionDep = Annotated[AsyncSession, Depends(get_async_session)]
 SessionFactoryDep = Annotated[
     async_sessionmaker[AsyncSession], Depends(get_session_factory)
+]
+PgCallbackFactoryDep = Annotated[
+    PgCallbackFactory, Depends(get_pg_callback_factory)
+]
+ChatMessageHistoryFactoryDep = Annotated[
+    ChatMessageHistoryFactory, Depends(get_chat_message_history_factory)
 ]

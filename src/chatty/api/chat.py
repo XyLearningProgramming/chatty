@@ -13,16 +13,15 @@ from chatty.core.service.models import (
     StreamEvent,
 )
 from chatty.infra.concurrency import InboxFull
-from chatty.infra.db import load_conversation_history
 from chatty.infra.id_utils import generate_id
 from chatty.infra.telemetry import get_current_trace_id
 
 from .deps import (
     APIConfigDep,
     ChatConfigDep,
+    ChatMessageHistoryFactoryDep,
     ChatServiceDep,
     InboxDep,
-    SessionFactoryDep,
 )
 from .models import ChatRequest
 from .streaming import sse_stream
@@ -36,9 +35,7 @@ STREAMING_RESPONSE_HEADERS = {
     "Access-Control-Allow-Headers": (
         "Cache-Control, X-Chatty-Trace, X-Chatty-Conversation"
     ),
-    "Access-Control-Expose-Headers": (
-        "X-Chatty-Trace, X-Chatty-Conversation"
-    ),
+    "Access-Control-Expose-Headers": ("X-Chatty-Trace, X-Chatty-Conversation"),
 }
 
 router = APIRouter(tags=["chat"])
@@ -88,7 +85,7 @@ async def chat(
     api_config: APIConfigDep,
     chat_config: ChatConfigDep,
     inbox: InboxDep,
-    session_factory: SessionFactoryDep,
+    chat_message_history_factory: ChatMessageHistoryFactoryDep,
 ) -> StreamingResponse | JSONResponse:
     """Process a chat request and return a streaming response.
 
@@ -128,13 +125,14 @@ async def chat(
     trace_id = get_current_trace_id() or generate_id("trace")
 
     # --- Load history for continuing conversations ---
-    history = []
+    history: list = []
     if chat_request.conversation_id:
-        history = await load_conversation_history(
-            session_factory,
+        history_obj = chat_message_history_factory(
             conversation_id,
+            trace_id=None,
             max_messages=chat_config.max_conversation_length,
         )
+        history = await history_obj.aget_messages()
 
     ctx = ChatContext(
         query=chat_request.query,

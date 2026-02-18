@@ -8,12 +8,11 @@ implements ``_stream_response``.
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 from langchain_core.language_models import BaseLanguageModel
 from langchain_core.messages import BaseMessage, HumanMessage
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chatty.configs.config import AppConfig
 from chatty.infra.db.callback import PGMessageCallback
@@ -28,6 +27,8 @@ from .models import (
     StreamEvent,
 )
 from .stream import map_langgraph_stream
+
+PgCallbackFactory = Callable[[str, str, str | None], PGMessageCallback]
 
 
 class BaseChatService(ChatService):
@@ -44,14 +45,12 @@ class BaseChatService(ChatService):
         self,
         llm: BaseLanguageModel,
         config: AppConfig,
-        session_factory: async_sessionmaker[AsyncSession],
+        pg_callback_factory: PgCallbackFactory,
     ) -> None:
         self._llm = llm
         self._config = config
-        self._session_factory = session_factory
-        self._system_prompt = config.persona.build_system_prompt(
-            config.prompt.system_prompt
-        )
+        self._pg_callback_factory = pg_callback_factory
+        self._system_prompt = config.prompt.render_system_prompt(config.persona)
 
     # ------------------------------------------------------------------
     # PG callback helper
@@ -61,11 +60,10 @@ class BaseChatService(ChatService):
         self, ctx: ChatContext
     ) -> PGMessageCallback:
         """Create a per-request PG callback for message recording."""
-        return PGMessageCallback(
-            session_factory=self._session_factory,
-            conversation_id=ctx.conversation_id,
-            trace_id=ctx.trace_id,
-            model_name=getattr(self._llm, "model_name", None),
+        return self._pg_callback_factory(
+            ctx.conversation_id,
+            ctx.trace_id,
+            getattr(self._llm, "model_name", None),
         )
 
     # ------------------------------------------------------------------

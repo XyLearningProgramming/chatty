@@ -1,9 +1,7 @@
-"""Embedding infrastructure -- client, repository, and background cron."""
+"""Embedding infrastructure -- gated client and background cron."""
 
-from .client import EmbeddingClient
-from .repository import EmbeddingRepository
+from .gated import GatedEmbedModel
 
 __all__ = [
-    "EmbeddingClient",
-    "EmbeddingRepository",
+    "GatedEmbedModel",
 ]

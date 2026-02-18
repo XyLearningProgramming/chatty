@@ -4,7 +4,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from chatty.core.service.tools.processors import HtmlHeadTitleMeta
+from chatty.infra.processor_utils import HtmlHeadTitleMeta
 
 
 def test_real_site_html_processing():

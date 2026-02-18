@@ -1,15 +1,20 @@
 """Base classes and protocols for tools."""
 
+from __future__ import annotations
+
 from abc import abstractmethod
-from typing import Any, Protocol, Self
+from typing import TYPE_CHECKING, Protocol, Self
 
 from chatty.configs.persona import KnowledgeSource, ToolDeclaration
+
+if TYPE_CHECKING:
+    from chatty.configs.system import PromptConfig
 
 
 class ToolBuilder(Protocol):
     """Protocol for tool builders that create tools from config.
 
-    Each concrete builder handles one ``tool_type`` (e.g. ``'url'``).
+    Each concrete builder handles one ``tool_type`` (e.g. ``'url_dispatcher'``).
     The registry calls ``from_declaration`` once per tool entry to
     produce a single dispatcher tool that the model sees.
     """
@@ -25,8 +30,7 @@ class ToolBuilder(Protocol):
         cls,
         declaration: ToolDeclaration,
         sources: dict[str, KnowledgeSource],
-        *,
-        processors: dict[str, list[Any]] | None = None,
+        prompt: PromptConfig,
     ) -> Self:
         """Build a single dispatcher tool from a tool declaration.
 
@@ -36,8 +40,7 @@ class ToolBuilder(Protocol):
             The ``ToolDeclaration`` entry from persona config.
         sources:
             Full ``persona.sources`` dict for resolving source ids.
-        processors:
-            Mapping of source id to resolved ``Processor`` instances
-            (source-level + action-level merged).
+        prompt:
+            Prompt templates for tool descriptions and error messages.
         """
         ...

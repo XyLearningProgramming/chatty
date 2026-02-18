@@ -199,8 +199,8 @@ class ChatMessage(Base):
 # pgvector support
 # ---------------------------------------------------------------------------
 
-# Default embedding dimensions (text-embedding-ada-002)
-EMBEDDING_DIMENSIONS = 1536
+# Default embedding dimensions (Qwen3-0.6B hidden_size)
+EMBEDDING_DIMENSIONS = 1024
 
 
 class Vector(TypeDecorator):
@@ -253,27 +253,22 @@ class Vector(TypeDecorator):
 # ---------------------------------------------------------------------------
 
 
-class TextEmbedding(Base):
-    """Cached text embedding vector.
+class SourceEmbedding(Base):
+    """Embedded match-hints vector for a persona knowledge source.
 
-    Stores the SHA-256 hash of the input text alongside the embedding
-    vector (as a pgvector vector type) and the model name that produced it.
-    The ``(text_hash, model_name)`` pair is unique so that the same text
-    can have embeddings from different models.
+    Keyed by ``(source_id, model_name)`` where ``source_id`` is the
+    persona config key (e.g. ``"resume"``).  The vector is the
+    embedding of the concatenated ``match_hints`` text for that source.
     """
 
-    __tablename__ = "text_embeddings"
+    __tablename__ = "source_embeddings"
 
     id: Mapped[int] = mapped_column(
         BigInteger,
         primary_key=True,
         autoincrement=True,
     )
-    text_hash: Mapped[str] = mapped_column(
-        String,
-        nullable=False,
-    )
-    text_content: Mapped[str] = mapped_column(
+    source_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
     )
@@ -293,8 +288,8 @@ class TextEmbedding(Base):
 
     __table_args__ = (
         Index(
-            "uq_text_embeddings_text_hash_model_name",
-            "text_hash",
+            "uq_source_embeddings_source_id_model_name",
+            "source_id",
             "model_name",
             unique=True,
         ),
@@ -302,6 +297,7 @@ class TextEmbedding(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<TextEmbedding(id={self.id}, text_hash={self.text_hash!r}, "
+            f"<SourceEmbedding(id={self.id}, "
+            f"source_id={self.source_id!r}, "
             f"model_name={self.model_name!r})>"
         )

@@ -163,25 +163,28 @@ class AppConfig(BaseSettings):
 
 
 class _PromptYamlSettingsSource(PydanticBaseSettingsSource):
-    """Custom settings source that loads prompt.yml file."""
+    """Loads ``prompt.yml`` and validates it against :class:`PromptConfig`.
+
+    The YAML is run through ``PromptConfig.model_validate`` so type
+    errors surface immediately with clear Pydantic messages instead
+    of propagating as opaque dicts.
+    """
 
     def __init__(self, settings_cls: type[BaseSettings]) -> None:
         self.settings_cls = settings_cls
 
     def __call__(self) -> dict[str, Any]:
-        """Load prompt config from prompt.yml file."""
         if not PROMPT_CONFIG_FILE.exists():
             return {}
 
-        try:
-            with open(PROMPT_CONFIG_FILE, encoding=DEFAULT_ENCODING) as f:
-                data = yaml.safe_load(f)
-                if data and "system_prompt" in data:
-                    return {"prompt": {"system_prompt": data["system_prompt"]}}
-        except Exception:
-            pass
+        with open(PROMPT_CONFIG_FILE, encoding=DEFAULT_ENCODING) as f:
+            data = yaml.safe_load(f)
 
-        return {}
+        if not isinstance(data, dict):
+            return {}
+
+        prompt = PromptConfig.model_validate(data)
+        return {"prompt": prompt.model_dump()}
 
 
 def get_app_config() -> AppConfig:

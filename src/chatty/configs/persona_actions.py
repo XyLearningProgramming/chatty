@@ -7,6 +7,19 @@ from pydantic import BaseModel, Field
 from .persona_processors import ProcessorRef
 
 
+def _get_processors(refs: list[ProcessorRef]) -> list:
+    """Turn a list of ``ProcessorRef`` values into instantiated processors."""
+    if not refs:
+        return []
+    from chatty.infra.processor_utils import get_processor
+
+    return [
+        get_processor(p) if isinstance(p, str)
+        else get_processor(p.name, **p.model_dump(exclude={"name"}, exclude_none=True))
+        for p in refs
+    ]
+
+
 class ToolDeclaration(BaseModel):
     """A tool exposed to the LLM agent.
 
@@ -31,6 +44,9 @@ class ToolDeclaration(BaseModel):
         description="Tool description for the model",
     )
 
+    def get_processors(self) -> list:
+        return _get_processors(self.processors)
+
 
 class EmbedDeclaration(BaseModel):
     """An embed action for RAG retrieval.
@@ -52,3 +68,6 @@ class EmbedDeclaration(BaseModel):
         description="Action-level processors for content before "
         "prompt injection",
     )
+
+    def get_processors(self) -> list:
+        return _get_processors(self.processors)

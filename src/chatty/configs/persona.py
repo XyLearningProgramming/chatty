@@ -12,7 +12,6 @@ Re-exports all persona types so callers can use::
 
 from __future__ import annotations
 
-from jinja2 import Template
 from pydantic import BaseModel, Field, model_validator
 
 from .persona_actions import EmbedDeclaration, ToolDeclaration
@@ -21,9 +20,10 @@ from .persona_processors import (
     ProcessorWithArgs,
     processor_ref_name,
 )
-from .persona_sources import KnowledgeSource
+from .persona_sources import HttpGet, KnowledgeSource
 
 __all__ = [
+    "HttpGet",
     "EmbedDeclaration",
     "KnowledgeSource",
     "PersonaConfig",
@@ -81,32 +81,3 @@ class PersonaConfig(BaseModel):
                 )
 
         return self
-
-    def build_system_prompt(self, system_prompt_template: str) -> str:
-        """Render the system prompt from persona fields.
-
-        Args:
-            system_prompt_template: Jinja2 template string.
-
-        Returns a ready-to-use system message string.
-        """
-        if not system_prompt_template:
-            raise ValueError(
-                "System prompt template is required. "
-                "Ensure prompt.system_prompt is configured."
-            )
-
-        template = Template(system_prompt_template.strip())
-
-        persona_character = (
-            ", ".join(self.character) if self.character else None
-        )
-        persona_expertise = (
-            ", ".join(self.expertise) if self.expertise else None
-        )
-
-        return template.render(
-            persona_name=self.name,
-            persona_character=persona_character,
-            persona_expertise=persona_expertise,
-        )

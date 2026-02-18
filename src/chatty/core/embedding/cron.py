@@ -1,15 +1,13 @@
-"""Background cron that opportunistically embeds persona sources.
+"""Background cron that embeds persona source match_hints.
 
 Each tick:
 
 1. Reads ``persona.embed`` declarations from the (hot-reloadable) config.
-2. For URL sources, fetches and caches the resolved content (applying
-   source-level + embed-level processors).
-3. For each embed declaration, builds ``match_hints`` text and checks
-   the DB for missing embeddings.
-4. For each missing embedding, races for the ``ModelSemaphore`` via
-   ``try_embed`` (instant-timeout).  If the slot is busy, the entry
-   is skipped until the next tick.
+2. For each declaration whose ``source_id`` is not yet in the DB,
+   embeds the ``match_hints`` text (gated) and upserts the vector.
+
+Content resolution is NOT this module's job — whoever needs a source's
+content resolves it ad hoc at request time.
 
 ``build_cron`` is a lifespan dependency that creates, starts,
 and stops the cron automatically via ``yield``.
@@ -20,94 +18,23 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
-import httpx
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 
 from chatty.configs.config import AppConfig, get_app_config
-from chatty.configs.persona import EmbedDeclaration, KnowledgeSource
-from chatty.core.service.tools.processors import resolve_processors
-from chatty.core.service.tools.url_tool import (
-    _PDF_CONTENT_TYPES,
-    _extract_text_from_pdf,
-)
+from chatty.configs.persona import EmbedDeclaration
+from chatty.infra.concurrency.base import AcquireTimeout
 from chatty.infra.concurrency.semaphore import build_semaphore
+from chatty.infra.db.embedding import EmbeddingRepository
 from chatty.infra.db.engine import build_db
 from chatty.infra.lifespan import get_app
 
-from .client import EmbeddingClient
-from .repository import EmbeddingRepository, text_hash
+from .gated import GatedEmbedModel
 
 logger = logging.getLogger(__name__)
 
-_resolved_content: dict[str, str] = {}
-"""In-memory cache of fully processed content keyed by source id."""
-
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
-
-async def _fetch_source_content(
-    source_id: str,
-    source: KnowledgeSource,
-    embed_decl: EmbedDeclaration,
-) -> str | None:
-    """Fetch content from a source's ``content_url``.
-
-    Applies source-level processors then embed-level processors.
-    Returns ``None`` on failure (logged, not raised).
-    """
-    url = source.content_url
-    timeout_seconds = source.timeout.total_seconds()
-
-    try:
-        async with httpx.AsyncClient(
-            timeout=timeout_seconds
-        ) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-
-            ct = response.headers.get("content-type", "")
-            if any(pdf in ct for pdf in _PDF_CONTENT_TYPES):
-                content = _extract_text_from_pdf(response.content)
-            else:
-                content = response.text
-
-            # Source-level processors
-            if source.processors:
-                for proc in resolve_processors(source.processors):
-                    content = proc.process(content)
-
-            # Embed action-level processors
-            if embed_decl.processors:
-                for proc in resolve_processors(embed_decl.processors):
-                    content = proc.process(content)
-
-            return content
-    except Exception:
-        logger.warning(
-            "Cron: failed to fetch content for source '%s' "
-            "from %s",
-            source_id,
-            url,
-            exc_info=True,
-        )
-        return None
-
-
-def _source_text(
-    source_id: str,
-    source: KnowledgeSource,
-) -> str | None:
-    """Return the embeddable text for a source (resolved or inline)."""
-    if source.content_url:
-        return _resolved_content.get(source_id)
-    return source.content or None
-
 
 def _match_hints_text(decl: EmbedDeclaration) -> str:
-    """Build the text to embed for query matching from match_hints."""
+    """Build the text to embed from match_hints."""
     return "\n".join(decl.match_hints)
 
 
@@ -117,18 +44,20 @@ def _match_hints_text(decl: EmbedDeclaration) -> str:
 
 
 class EmbeddingCron:
-    """Manages the embedding background loop lifecycle.
+    """Embeds match_hints for persona sources that are not yet in the DB.
 
-    Owns the ``EmbeddingClient`` (exposed via ``.client`` for DI)
-    and an ``asyncio.Task`` that ticks at a configurable interval.
+    Uses ``EmbeddingRepository`` for DB ops and ``GatedEmbedModel``
+    only for the gated embed call.
     """
 
     def __init__(
         self,
-        client: EmbeddingClient,
+        embedder: GatedEmbedModel,
+        repository: EmbeddingRepository,
         interval: int,
     ) -> None:
-        self.client = client
+        self.embedder = embedder
+        self.repository = repository
         self._interval = interval
         self._task: asyncio.Task[None] | None = None
 
@@ -169,62 +98,52 @@ class EmbeddingCron:
 
     async def _tick(self) -> None:
         config = get_app_config()
-        sources = config.persona.sources
         embed_decls = config.persona.embed
+        model_name = self.embedder.model_name
 
-        # Step 1: Resolve URL content for embed sources
         for decl in embed_decls:
-            source = sources.get(decl.source)
-            if source is None:
-                continue
-            if not source.content_url:
-                continue
-            if decl.source in _resolved_content:
+            if await self.repository.exists(decl.source, model_name):
                 continue
 
-            content = await _fetch_source_content(
-                decl.source, source, decl
-            )
-            if content:
-                _resolved_content[decl.source] = content
-                logger.info(
-                    "Cron: resolved content for source '%s' "
-                    "(%d chars)",
-                    decl.source,
-                    len(content),
-                )
-
-        # Step 2: Find match_hints that need embedding
-        hints_to_embed: list[tuple[EmbedDeclaration, str]] = []
-        for decl in embed_decls:
             hints_text = _match_hints_text(decl)
             if not hints_text:
                 continue
-            cached = await self.client.get_cached(hints_text)
-            if cached is None:
-                hints_to_embed.append((decl, hints_text))
 
-        if hints_to_embed:
-            logger.info(
-                "Cron: %d embed entry/entries need embedding",
-                len(hints_to_embed),
-            )
-
-        # Step 3: Try to embed each missing hints text
-        for decl, hints_text in hints_to_embed:
-            result = await self.client.try_embed(hints_text)
-            if result is not None:
-                logger.info(
-                    "Cron: embedded match_hints for source '%s' "
-                    "(%d dims)",
-                    decl.source,
-                    len(result),
+            try:
+                vec = await self.embedder.embed(hints_text)
+                await self.repository.upsert(
+                    decl.source, vec, model_name
                 )
-            else:
+                logger.info(
+                    "Cron: embedded match_hints for source '%s'",
+                    decl.source,
+                )
+            except AcquireTimeout:
                 logger.debug(
                     "Cron: semaphore busy, skipping source '%s'",
                     decl.source,
                 )
+            except Exception:
+                logger.warning(
+                    "Cron: failed to embed/upsert source '%s'",
+                    decl.source,
+                    exc_info=True,
+                )
+
+
+# ------------------------------------------------------------------
+# FastAPI dependencies — built by build_cron, accessed via app.state
+# ------------------------------------------------------------------
+
+
+def get_embedder(request: Request) -> GatedEmbedModel:
+    """FastAPI dependency — reads from ``app.state``."""
+    return request.app.state.embedder
+
+
+def get_embedding_repository(request: Request) -> EmbeddingRepository:
+    """FastAPI dependency — reads from ``app.state``."""
+    return request.app.state.embedding_repository
 
 
 # ------------------------------------------------------------------
@@ -240,16 +159,17 @@ async def build_cron(
 ) -> AsyncGenerator[None, None]:
     """Create, start, and expose the embedding cron on ``app.state``."""
     repo = EmbeddingRepository(app.state.session_factory)
-    client = EmbeddingClient(
+    embedder = GatedEmbedModel(
         config=config.embedding,
-        repository=repo,
         semaphore=app.state.semaphore,
     )
     cron = EmbeddingCron(
-        client=client,
+        embedder=embedder,
+        repository=repo,
         interval=config.rag.cron_interval,
     )
-    app.state.embedding_client = cron.client
+    app.state.embedder = embedder
+    app.state.embedding_repository = repo
     app.state.embedding_cron = cron
     await cron.start()
     yield

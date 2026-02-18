@@ -50,8 +50,8 @@ chat:
 embedding:
   # endpoint: "http://localhost:8000/api/v1/"  # inject via CHATTY_EMBEDDING__ENDPOINT
   # api_key: ""                                # inject via CHATTY_EMBEDDING__API_KEY
-  model_name: "text-embedding-ada-002"
-  dimensions: 1536
+  model_name: "Qwen3-0.6B"
+  dimensions: 1024
 
 # --- RAG ---
 rag:

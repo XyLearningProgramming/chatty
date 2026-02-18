@@ -5,11 +5,15 @@ Defines where content comes from (content_url or inline content).
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .persona_processors import ProcessorRef
+
+HttpGet = Callable[[str, float], Awaitable[str]]
+"""``async (url, timeout) -> text`` — matches ``HttpClient.get``."""
 
 
 class KnowledgeSource(BaseModel):
@@ -64,3 +68,35 @@ class KnowledgeSource(BaseModel):
                 "Source must have either content_url or content"
             )
         return self
+
+    def get_processors(self) -> list:
+        """Resolve ``self.processors`` refs into instantiated processors."""
+        if not self.processors:
+            return []
+        from chatty.infra.processor_utils import get_processor
+
+        return [
+            get_processor(p) if isinstance(p, str)
+            else get_processor(p.name, **p.model_dump(exclude={"name"}, exclude_none=True))
+            for p in self.processors
+        ]
+
+    async def get_content(
+        self,
+        http_get: HttpGet,
+        extra_processors: list | None = None,
+    ) -> str:
+        """Return processed content — inline or fetched via *http_get*.
+
+        Applies source-level processors first, then *extra_processors*.
+        Callers decide whether to cache the result.
+        """
+        if self.content:
+            text = self.content
+        else:
+            text = await http_get(
+                self.content_url, self.timeout.total_seconds()
+            )
+        for p in self.get_processors() + (extra_processors or []):
+            text = p.process(text)
+        return text

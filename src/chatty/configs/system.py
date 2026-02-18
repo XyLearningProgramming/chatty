@@ -1,6 +1,13 @@
-from datetime import timedelta
+from __future__ import annotations
 
+from datetime import timedelta
+from typing import TYPE_CHECKING
+
+from jinja2 import Template
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from .persona import PersonaConfig
 
 
 class ThirdPartyConfig(BaseModel):
@@ -149,11 +156,11 @@ class EmbeddingConfig(BaseModel):
         description="API key for the embedding service",
     )
     model_name: str = Field(
-        default="text-embedding-ada-002",
+        default="Qwen3-0.6B",
         description="Embedding model name",
     )
     dimensions: int = Field(
-        default=1536,
+        default=1024,
         description="Embedding vector dimensionality",
     )
 
@@ -209,10 +216,92 @@ class TracingConfig(BaseModel):
 
 
 class PromptConfig(BaseModel):
-    """System prompt configuration."""
+    """System prompt configuration.
+
+    All templates use Jinja2 syntax and are loaded from
+    ``configs/prompt.yml``.
+    """
+
+    # --- system / RAG prompts ---
 
     system_prompt: str = Field(
         default="",
         description="Jinja2 template for system prompt with variables: "
         "persona_name, persona_character, persona_expertise",
     )
+    rag_system_prompt: str = Field(
+        default="",
+        description="Jinja2 template for the final RAG system prompt. "
+        "Receives {{ base }} (rendered system_prompt) and {{ content }} "
+        "(retrieved context block). Required when using the RAG chat service.",
+    )
+
+    # --- tool prompts ---
+
+    tool_description: str = Field(
+        default="",
+        description="Fallback tool description when YAML declaration has none.",
+    )
+    tool_source_field: str = Field(
+        default="",
+        description="Jinja2 template for the source field description. "
+        "Receives {{ options }} (dict of source_id → desc).",
+    )
+    tool_source_hint: str = Field(
+        default="",
+        description="Jinja2 fallback per-source description. "
+        "Receives {{ source_id }}.",
+    )
+    tool_error_unknown_source: str = Field(
+        default="",
+        description="Jinja2 error template for unknown source. "
+        "Receives {{ source }} and {{ valid }}.",
+    )
+
+    # --- render helpers ---
+
+    @staticmethod
+    def _render(raw: str, **kwargs: object) -> str:
+        return Template(raw.strip()).render(**kwargs)
+
+    def render_system_prompt(self, persona: PersonaConfig) -> str:
+        """Render ``system_prompt`` with persona identity fields."""
+        raw = (self.system_prompt or "").strip()
+        if not raw:
+            raise ValueError(
+                "system_prompt is required. "
+                "Set it in configs/prompt.yml."
+            )
+        return Template(raw).render(
+            persona_name=persona.name,
+            persona_character=", ".join(persona.character) if persona.character else None,
+            persona_expertise=", ".join(persona.expertise) if persona.expertise else None,
+        )
+
+    def render_rag_prompt(self, *, base: str, content: str) -> str:
+        """Render ``rag_system_prompt`` with the base system prompt and
+        retrieved context.
+        """
+        raw = (self.rag_system_prompt or "").strip()
+        if not raw:
+            raise ValueError(
+                "rag_system_prompt is required. "
+                "Set it in configs/prompt.yml."
+            )
+        return Template(raw).render(base=base, content=content)
+
+    def render_tool_source_field(
+        self, options: dict[str, str]
+    ) -> str:
+        """Render the ``source`` field description for tool schemas."""
+        return self._render(self.tool_source_field, options=options)
+
+    def render_tool_source_hint(self, source_id: str) -> str:
+        """Render a fallback per-source description."""
+        return self._render(self.tool_source_hint, source_id=source_id)
+
+    def render_tool_error(self, *, source: str, valid: str) -> str:
+        """Render the unknown-source error message."""
+        return self._render(
+            self.tool_error_unknown_source, source=source, valid=valid
+        )

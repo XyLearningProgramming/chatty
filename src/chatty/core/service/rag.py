@@ -15,15 +15,13 @@ import logging
 
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseLanguageModel
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chatty.configs.config import AppConfig
-from chatty.configs.persona import EmbedDeclaration
-from chatty.core.embedding.client import EmbeddingClient
-from chatty.core.embedding.cron import _match_hints_text, _source_text
-from chatty.core.embedding.repository import text_hash
+from chatty.core.embedding.gated import GatedEmbedModel
+from chatty.infra.db.embedding import EmbeddingRepository
+from chatty.infra.http_utils import HttpClient
 
-from .base import GraphChatService
+from .base import GraphChatService, PgCallbackFactory
 from .models import ChatContext
 
 logger = logging.getLogger(__name__)
@@ -34,8 +32,8 @@ class RagChatService(GraphChatService):
 
     Flow:
     1. Embed the user query (blocking semaphore acquire).
-    2. Search for similar match_hints embeddings using pgvector.
-    3. Map results back to source ids and retrieve full content.
+    2. Single pgvector search returns (source_id, similarity) tuples.
+    3. Resolve each source_id to full content via persona config.
     4. Build an enriched system prompt with retrieved context.
     5. Create a simple agent graph (no tools) with the enriched prompt.
     """
@@ -46,68 +44,59 @@ class RagChatService(GraphChatService):
         self,
         llm: BaseLanguageModel,
         config: AppConfig,
-        embedding_client: EmbeddingClient,
-        session_factory: async_sessionmaker[AsyncSession],
+        embedder: GatedEmbedModel,
+        embedding_repository: EmbeddingRepository,
+        pg_callback_factory: PgCallbackFactory,
     ) -> None:
-        super().__init__(llm, config, session_factory)
-        self._embedding_client = embedding_client
+        super().__init__(llm, config, pg_callback_factory)
+        self._embedder = embedder
+        self._embedding_repository = embedding_repository
         self._rag_config = config.rag
+        config.prompt.render_rag_prompt(base="", content="")
 
     # ------------------------------------------------------------------
-    # Top-K retrieval (match_hints based)
+    # Top-K retrieval
     # ------------------------------------------------------------------
 
     async def _retrieve_top_k(
         self,
         query_emb: list[float],
-        embed_decls: list[EmbedDeclaration],
     ) -> list[tuple[str, str, float]]:
         """Return (source_id, full_content, similarity) tuples.
 
-        Matches the user query embedding against match_hints
-        embeddings in pgvector, then resolves the source_id to
-        full content for prompt injection.
+        Content is resolved ad hoc per source (inline or URL fetch)
+        with source-level + embed-level processors applied.
         """
-        sources = self._config.persona.sources
+        persona = self._config.persona
+        sources = persona.sources
+        embed_by_source = {d.source: d for d in persona.embed}
 
-        # Build mapping from hints_hash -> (source_id, full_content)
-        hints_map: dict[str, tuple[str, str]] = {}
-        text_hashes: list[str] = []
-
-        for decl in embed_decls:
-            source = sources.get(decl.source)
-            if source is None:
-                continue
-
-            hints_text = _match_hints_text(decl)
-            if not hints_text:
-                continue
-
-            full_content = _source_text(decl.source, source)
-            if full_content is None:
-                continue
-
-            hash_value = text_hash(hints_text)
-            hints_map[hash_value] = (decl.source, full_content)
-            text_hashes.append(hash_value)
-
-        if not text_hashes:
-            return []
-
-        results = await self._embedding_client.search_similar(
-            query_embedding=query_emb,
-            similarity_threshold=self._rag_config.similarity_threshold,
-            top_k=self._rag_config.top_k,
-            text_hashes=text_hashes,
+        results = await self._embedding_repository.search(
+            query_emb,
+            self._embedder.model_name,
+            self._rag_config.similarity_threshold,
+            self._rag_config.top_k,
         )
 
         top_results: list[tuple[str, str, float]] = []
-        for hints_hash, _text_content, similarity in results:
-            if hints_hash in hints_map:
-                source_id, full_content = hints_map[hints_hash]
-                top_results.append(
-                    (source_id, full_content, similarity)
+        for source_id, similarity in results:
+            source = sources.get(source_id)
+            if source is None:
+                continue
+            try:
+                decl = embed_by_source.get(source_id)
+                content = await source.get_content(
+                    HttpClient.get,
+                    extra_processors=decl.get_processors() if decl else None,
                 )
+            except Exception:
+                logger.warning(
+                    "Failed to resolve content for source '%s'",
+                    source_id,
+                    exc_info=True,
+                )
+                continue
+            top_results.append((source_id, content, similarity))
 
         return top_results
 
@@ -119,24 +108,16 @@ class RagChatService(GraphChatService):
         self,
         top_results: list[tuple[str, str, float]],
     ) -> str:
-        """Build an enriched system prompt with retrieved context."""
-        base = self._system_prompt
-
-        if not top_results:
-            return base
-
+        """Render the RAG system prompt template with base + content."""
         context_parts: list[str] = []
         for source_id, content, sim in top_results:
             context_parts.append(
                 f"### {source_id} (relevance: {sim:.2f})\n{content}"
             )
 
-        context_block = "\n\n".join(context_parts)
-        return (
-            f"{base}\n\n"
-            "Below is relevant context retrieved from your "
-            "knowledge base. Use it to inform your answer:\n\n"
-            f"{context_block}"
+        return self._config.prompt.render_rag_prompt(
+            base=self._system_prompt,
+            content="\n\n".join(context_parts),
         )
 
     # ------------------------------------------------------------------
@@ -145,12 +126,9 @@ class RagChatService(GraphChatService):
 
     async def _create_graph(self, ctx: ChatContext):
         """Create a simple LangGraph agent with enriched RAG prompt."""
-        query_emb = await self._embedding_client.embed(ctx.query)
+        query_emb = await self._embedder.embed(ctx.query)
 
-        embed_decls = self._config.persona.embed
-        top_results = await self._retrieve_top_k(
-            query_emb, embed_decls
-        )
+        top_results = await self._retrieve_top_k(query_emb)
 
         enriched_prompt = self._build_rag_prompt(top_results)
 
