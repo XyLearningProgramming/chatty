@@ -107,8 +107,8 @@ def get_app() -> FastAPI:
 
     app.get("/health")(lambda: "ok")
 
-    # OpenTelemetry — instruments FastAPI + httpx; no-op if OTEL env vars absent.
-    init_telemetry(app)
+    # OpenTelemetry — instruments FastAPI + httpx; no-op if tracing is disabled.
+    init_telemetry(app, config.tracing)
 
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 

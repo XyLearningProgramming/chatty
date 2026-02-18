@@ -36,6 +36,7 @@ from .system import (
     PromptConfig,
     RagConfig,
     ThirdPartyConfig,
+    TracingConfig,
 )
 
 # ---------------------------------------------------------------------------
@@ -126,6 +127,11 @@ class AppConfig(BaseSettings):
     prompt: PromptConfig = Field(
         default_factory=PromptConfig,
         description="System prompt configuration",
+    )
+
+    tracing: TracingConfig = Field(
+        default_factory=TracingConfig,
+        description="OpenTelemetry tracing configuration",
     )
 
     @classmethod

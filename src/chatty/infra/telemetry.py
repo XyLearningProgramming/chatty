@@ -1,16 +1,8 @@
 """OpenTelemetry bootstrap — tracing initialisation and helpers.
 
-Configures a ``TracerProvider`` with an OTLP exporter when the standard
-``OTEL_EXPORTER_OTLP_ENDPOINT`` environment variable is set.  When the
-variable is absent the module is a graceful no-op (local dev without a
-collector).
-
-The OTEL SDK reads its configuration from well-known env vars
-automatically:
-
-- ``OTEL_EXPORTER_OTLP_ENDPOINT``
-- ``OTEL_EXPORTER_OTLP_HEADERS``
-- ``OTEL_SERVICE_NAME``
+Configures a ``TracerProvider`` with an OTLP HTTP exporter when tracing is
+enabled via ``TracingConfig``.  When disabled the module is a graceful no-op
+(local dev without a collector).
 
 Auto-instrumentations wired here:
 
@@ -22,7 +14,7 @@ Usage::
 
     # In app.py — before lifespan:
     from chatty.infra.telemetry import init_telemetry
-    init_telemetry(app)
+    init_telemetry(app, config.tracing)
 
     # In app.py — inside lifespan, after engine is created:
     from chatty.infra.telemetry import instrument_sqlalchemy
@@ -33,24 +25,25 @@ Usage::
     trace_id = get_current_trace_id()  # 32-char hex or None
 """
 
+from __future__ import annotations
+
+import base64
 import logging
-import os
 
 from opentelemetry import trace
 from opentelemetry.trace import format_trace_id
 
+from chatty.configs.system import TracingConfig
+
 logger = logging.getLogger(__name__)
 
-# Sentinel: is the OTEL SDK actually exporting?
 _otel_enabled = False
 
 
-def _is_otel_configured() -> bool:
-    """Return ``True`` when the OTLP endpoint env var is set."""
-    return bool(os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"))
-
-
-def init_telemetry(app: object | None = None) -> None:
+def init_telemetry(
+    app: object | None = None,
+    settings: TracingConfig | None = None,
+) -> None:
     """Initialise the OTEL ``TracerProvider`` and auto-instrumentations.
 
     Parameters
@@ -58,48 +51,63 @@ def init_telemetry(app: object | None = None) -> None:
     app:
         The FastAPI application instance.  Passed to the FastAPI
         instrumentor so it can attach ASGI middleware.
-
-    This function is idempotent — safe to call more than once.
+    settings:
+        Tracing configuration.  When ``None`` or ``enabled`` is
+        ``False``, this function is a no-op.
     """
     global _otel_enabled  # noqa: PLW0603
 
-    if not _is_otel_configured():
-        logger.info(
-            "OTEL_EXPORTER_OTLP_ENDPOINT not set — "
-            "OpenTelemetry tracing disabled."
+    if settings is None or not settings.enabled:
+        logger.info("OpenTelemetry tracing disabled.")
+        return
+
+    if not settings.endpoint or not settings.username or not settings.password:
+        logger.warning(
+            "Tracing enabled but endpoint/credentials not configured — "
+            "skipping OpenTelemetry setup."
         )
         return
 
-    # Import heavy SDK pieces only when actually needed.
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
         OTLPSpanExporter,
     )
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
-    service_name = os.environ.get("OTEL_SERVICE_NAME", "chatty")
-    resource = Resource.create({"service.name": service_name})
+    resource = Resource.create({"service.name": settings.service_name})
 
-    provider = TracerProvider(resource=resource)
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+    sampler = ParentBased(root=TraceIdRatioBased(settings.sample_rate))
+    provider = TracerProvider(resource=resource, sampler=sampler)
+
+    credentials = f"{settings.username}:{settings.password}"
+    encoded = base64.b64encode(credentials.encode()).decode()
+    headers = {"Authorization": f"Basic {encoded}"}
+
+    exporter = OTLPSpanExporter(
+        endpoint=settings.endpoint,
+        headers=headers,
+    )
+    provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
 
     # --- Auto-instrumentations ---
 
-    # FastAPI (inbound)
     if app is not None:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        FastAPIInstrumentor.instrument_app(app)
+        excluded = ",".join(settings.excluded_urls) if settings.excluded_urls else ""
+        FastAPIInstrumentor.instrument_app(app, excluded_urls=excluded)
 
-    # httpx (outbound — covers langchain-openai LLM calls)
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
     HTTPXClientInstrumentor().instrument()
 
     _otel_enabled = True
-    logger.info("OpenTelemetry tracing initialised (service=%s).", service_name)
+    logger.info(
+        "OpenTelemetry tracing initialised (service=%s).", settings.service_name
+    )
 
 
 def instrument_sqlalchemy(engine: object) -> None:
@@ -113,7 +121,6 @@ def instrument_sqlalchemy(engine: object) -> None:
 
     from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
-    # The async engine exposes its sync counterpart via .sync_engine.
     sync_engine = getattr(engine, "sync_engine", engine)
     SQLAlchemyInstrumentor().instrument(engine=sync_engine)
     logger.info("SQLAlchemy engine instrumented for OTEL tracing.")

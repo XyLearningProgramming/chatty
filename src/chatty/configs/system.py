@@ -167,6 +167,39 @@ class RagConfig(BaseModel):
     )
 
 
+class TracingConfig(BaseModel):
+    """OpenTelemetry tracing configuration."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable OpenTelemetry tracing export",
+    )
+    service_name: str = Field(
+        default="chatty",
+        description="Service name used in the trace provider resource",
+    )
+    endpoint: str = Field(
+        default="",
+        description="Grafana Tempo OTLP HTTP endpoint URL",
+    )
+    username: str = Field(
+        default="",
+        description="Grafana Tempo basic-auth username",
+    )
+    password: str = Field(
+        default="",
+        description="Grafana Tempo basic-auth password",
+    )
+    sample_rate: float = Field(
+        default=0.1,
+        description="Trace sampling rate (0.0-1.0)",
+    )
+    excluded_urls: list[str] = Field(
+        default=["/metrics", "/health"],
+        description="URL paths to exclude from tracing",
+    )
+
+
 class PromptConfig(BaseModel):
     """System prompt configuration."""
 

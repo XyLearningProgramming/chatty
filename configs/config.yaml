@@ -59,6 +59,15 @@ rag:
   similarity_threshold: 0.7
   cron_interval: 30
 
+# --- Tracing (secrets via env: CHATTY_TRACING__ENDPOINT, etc.) ---
+tracing:
+  enabled: false
+  service_name: chatty
+  sample_rate: 0.1
+  excluded_urls:
+    - /metrics
+    - /health
+
 # --- Concurrency gate ---
 concurrency:
   max_concurrency: 1

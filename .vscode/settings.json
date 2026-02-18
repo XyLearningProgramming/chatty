@@ -13,4 +13,5 @@
     // "ruff.lineLength": 88,
     // "ruff.lint.select": ["C", "E", "F", "W", "I"],
     "autoDocstring.docstringFormat": "sphinx",
+    "cursorpyright.analysis.autoImportCompletions": true,
 }
