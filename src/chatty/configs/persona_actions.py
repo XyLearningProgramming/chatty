@@ -14,7 +14,8 @@ def _get_processors(refs: list[ProcessorRef]) -> list:
     from chatty.infra.processor_utils import get_processor
 
     return [
-        get_processor(p) if isinstance(p, str)
+        get_processor(p)
+        if isinstance(p, str)
         else get_processor(p.name, **p.model_dump(exclude={"name"}, exclude_none=True))
         for p in refs
     ]
@@ -65,8 +66,7 @@ class EmbedDeclaration(BaseModel):
     )
     processors: list[ProcessorRef] = Field(
         default_factory=list,
-        description="Action-level processors for content before "
-        "prompt injection",
+        description="Action-level processors for content before prompt injection",
     )
 
     def get_processors(self) -> list:

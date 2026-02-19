@@ -67,13 +67,9 @@ class KnowledgeSource(BaseModel):
         has_url = bool(self.content_url)
         has_content = bool(self.content)
         if has_url and has_content:
-            raise ValueError(
-                "Source must have content_url OR content, not both"
-            )
+            raise ValueError("Source must have content_url OR content, not both")
         if not has_url and not has_content:
-            raise ValueError(
-                "Source must have either content_url or content"
-            )
+            raise ValueError("Source must have either content_url or content")
         return self
 
     def get_processors(self) -> list:
@@ -83,8 +79,11 @@ class KnowledgeSource(BaseModel):
         from chatty.infra.processor_utils import get_processor
 
         return [
-            get_processor(p) if isinstance(p, str)
-            else get_processor(p.name, **p.model_dump(exclude={"name"}, exclude_none=True))
+            get_processor(p)
+            if isinstance(p, str)
+            else get_processor(
+                p.name, **p.model_dump(exclude={"name"}, exclude_none=True)
+            )
             for p in self.processors
         ]
 
@@ -103,9 +102,7 @@ class KnowledgeSource(BaseModel):
         """Fetch URL content, returning a cached copy when within *cache_ttl*."""
         ttl = self.cache_ttl.total_seconds()
         if ttl <= 0:
-            return await http_get(
-                self.content_url, self.timeout.total_seconds()
-            )
+            return await http_get(self.content_url, self.timeout.total_seconds())
 
         key = self._cache_key(extra_processors)
         now = time.monotonic()
@@ -117,11 +114,9 @@ class KnowledgeSource(BaseModel):
                 if now - stored_at < ttl:
                     logger.debug("Content cache hit: %s", key[0])
                     return cached_text
-                del _content_cache[key] # Lazy eviction.
+                del _content_cache[key]  # Lazy eviction.
 
-        text = await http_get(
-            self.content_url, self.timeout.total_seconds()
-        )
+        text = await http_get(self.content_url, self.timeout.total_seconds())
 
         async with _cache_lock:
             _content_cache[key] = (text, time.monotonic())

@@ -6,12 +6,7 @@ metrics provided by ``prometheus-fastapi-instrumentator``.
 All metrics use the ``chatty_`` prefix.
 """
 
-import asyncio
-import functools
 import logging
-import time
-from collections.abc import AsyncGenerator, Callable
-from typing import Any, overload
 
 from fastapi import FastAPI
 from prometheus_client import Counter, Gauge, Histogram
@@ -52,6 +47,12 @@ STREAM_EVENTS_TOTAL = Counter(
     "chatty_stream_events_total",
     "Total stream events emitted, by event type",
     ["service", "event_type"],  # thinking | content | tool_call | error
+)
+
+SSE_STREAM_OUTCOMES_TOTAL = Counter(
+    "chatty_sse_stream_outcomes_total",
+    "Final outcome of each SSE stream",
+    ["code"],
 )
 
 # ---------------------------------------------------------------------------
@@ -160,98 +161,6 @@ EMBEDDING_CALLS_IN_FLIGHT = Gauge(
     "Number of embedding calls currently in-flight",
     ["model_name"],
 )
-
-
-# ---------------------------------------------------------------------------
-# Decorator
-# ---------------------------------------------------------------------------
-
-
-def _make_wrapper(
-    fn: Callable[..., AsyncGenerator], service: str
-) -> Callable[..., AsyncGenerator]:
-    """Build the observing async-generator wrapper for *fn*."""
-
-    @functools.wraps(fn)
-    async def wrapper(*args: Any, **kwargs: Any) -> AsyncGenerator:
-        CHAT_SESSIONS_ACTIVE.labels(service=service).inc()
-        start = time.monotonic()
-        status = "ok"
-        try:
-            async for event in fn(*args, **kwargs):
-                STREAM_EVENTS_TOTAL.labels(
-                    service=service, event_type=event.type
-                ).inc()
-                if event.type == "tool_call":
-                    TOOL_CALLS_TOTAL.labels(
-                        service=service,
-                        tool_name=event.name,
-                        status=event.status,
-                    ).inc()
-                yield event
-        except asyncio.CancelledError:
-            status = "cancelled"
-            raise
-        except Exception:
-            status = "error"
-            STREAM_EVENTS_TOTAL.labels(
-                service=service, event_type="error"
-            ).inc()
-            raise
-        finally:
-            CHAT_SESSIONS_ACTIVE.labels(service=service).dec()
-            CHAT_SESSIONS_TOTAL.labels(service=service, status=status).inc()
-            CHAT_SESSION_DURATION_SECONDS.labels(service=service).observe(
-                time.monotonic() - start
-            )
-
-    return wrapper
-
-
-@overload
-def observe_stream_response(
-    fn: Callable[..., AsyncGenerator],
-) -> Callable[..., AsyncGenerator]: ...
-
-
-@overload
-def observe_stream_response(
-    service_name: str = "",
-) -> Callable[[Callable[..., AsyncGenerator]], Callable[..., AsyncGenerator]]: ...
-
-
-def observe_stream_response(
-    fn_or_name: Callable[..., AsyncGenerator] | str = "",
-) -> (
-    Callable[..., AsyncGenerator]
-    | Callable[[Callable[..., AsyncGenerator]], Callable[..., AsyncGenerator]]
-):
-    """Decorator for ``stream_response`` that records all chat metrics.
-
-    Can be used bare or with a *service_name* argument::
-
-        @observe_stream_response          # service=""
-        @observe_stream_response("one_step")
-
-    Wraps an async-generator method to track:
-    - active session gauge (inc on entry, dec on exit)
-    - session total counter by outcome (ok / error / cancelled)
-    - session duration histogram
-    - per-event counters (event type, tool name + status)
-
-    All counters carry a ``service`` label set to *service_name*.
-    """
-    # Called as @observe_stream_response (no parens) — fn_or_name is the fn.
-    if callable(fn_or_name):
-        return _make_wrapper(fn_or_name, service="")
-
-    # Called as @observe_stream_response("one_step") — return a decorator.
-    service = fn_or_name
-
-    def decorator(fn: Callable[..., AsyncGenerator]) -> Callable[..., AsyncGenerator]:
-        return _make_wrapper(fn, service=service)
-
-    return decorator
 
 
 # ---------------------------------------------------------------------------

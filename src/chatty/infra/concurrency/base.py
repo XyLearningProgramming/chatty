@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -32,6 +31,7 @@ class RateLimited(Exception):
 
 class DuplicateRequest(Exception):
     """Raised when a duplicate request is detected (nonce or fingerprint)."""
+
 
 # ---------------------------------------------------------------------------
 # Abstract backends

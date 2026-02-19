@@ -1,6 +1,5 @@
 """Main CLI loop for interactive chat."""
 
-import asyncio
 import logging
 import sys
 from typing import TextIO
@@ -103,7 +102,9 @@ class ChattyCLI:
         """Print welcome message."""
         self._print("Chatty CLI - Interactive Chat Interface\n")
         self._print(f"Connected to: {self.config.chat_url}\n")
-        self._print("Type your message and press Enter. Type 'exit' or 'quit' to exit.\n\n")
+        self._print(
+            "Type your message and press Enter. Type 'exit' or 'quit' to exit.\n\n"
+        )
 
     def _print(self, text: str) -> None:
         """Print text to output stream."""

@@ -63,9 +63,7 @@ class PGMessageCallback(AsyncCallbackHandler):
         if self._initial_saved:
             return
 
-        to_add = prompt_messages_from_event(
-            messages[0], run_id, parent_run_id
-        )
+        to_add = prompt_messages_from_event(messages[0], run_id, parent_run_id)
         if to_add:
             try:
                 await self._history.aadd_messages(to_add)
@@ -88,13 +86,9 @@ class PGMessageCallback(AsyncCallbackHandler):
         **kwargs: Any,
     ) -> None:
         """Store the AI message (tool-call decision or final answer)."""
-        msg = ai_message_from_result(
-            response, run_id, parent_run_id, self.model_name
-        )
+        msg = ai_message_from_result(response, run_id, parent_run_id, self.model_name)
         if msg is None:
-            logger.debug(
-                "on_llm_end: could not extract AI message, skipping."
-            )
+            logger.debug("on_llm_end: could not extract AI message, skipping.")
             return
         try:
             await self._history.aadd_messages([msg])
@@ -129,9 +123,7 @@ class PGMessageCallback(AsyncCallbackHandler):
     ) -> None:
         """Store the tool result message."""
         name = self._tool_names.pop(run_id, tool_name_from_serialized({}))
-        msg = tool_message_from_output(
-            output, run_id, parent_run_id, name
-        )
+        msg = tool_message_from_output(output, run_id, parent_run_id, name)
         try:
             await self._history.aadd_messages([msg])
         except Exception:

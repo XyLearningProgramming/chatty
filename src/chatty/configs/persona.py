@@ -69,15 +69,11 @@ class PersonaConfig(BaseModel):
             unknown = set(tool.sources) - source_ids
             if unknown:
                 raise ValueError(
-                    f"Tool '{tool.name}' references unknown "
-                    f"sources: {unknown}"
+                    f"Tool '{tool.name}' references unknown sources: {unknown}"
                 )
 
         for entry in self.embed:
             if entry.source not in source_ids:
-                raise ValueError(
-                    f"Embed references unknown source: "
-                    f"'{entry.source}'"
-                )
+                raise ValueError(f"Embed references unknown source: '{entry.source}'")
 
         return self

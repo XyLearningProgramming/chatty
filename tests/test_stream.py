@@ -180,9 +180,7 @@ class TestMapLanggraphStream:
         assert isinstance(events[4], ContentEvent)
 
         # Verify concatenated content
-        content_text = "".join(
-            e.content for e in events if isinstance(e, ContentEvent)
-        )
+        content_text = "".join(e.content for e in events if isinstance(e, ContentEvent))
         assert content_text == "Here is the answer."
 
     @pytest.mark.asyncio

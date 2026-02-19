@@ -56,9 +56,7 @@ class HtmlHeadTitleMeta(TextProcessor):
         for meta in meta_tags:
             name = meta.get("name")
             prop = meta.get("property")
-            if (name and name in self.meta_attrs) or (
-                prop and prop in self.meta_attrs
-            ):
+            if (name and name in self.meta_attrs) or (prop and prop in self.meta_attrs):
                 new_head.append(meta.extract())
 
         html_tag = soup.new_tag("html")

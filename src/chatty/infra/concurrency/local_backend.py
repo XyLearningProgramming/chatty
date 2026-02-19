@@ -19,8 +19,7 @@ class LocalInboxBackend(InboxBackend):
         async with self._inbox_lock:
             if self._inbox_count >= self._inbox_max_size:
                 raise InboxFull(
-                    f"Inbox full ({self._inbox_max_size}): "
-                    "too many requests in flight."
+                    f"Inbox full ({self._inbox_max_size}): too many requests in flight."
                 )
             self._inbox_count += 1
             return self._inbox_count

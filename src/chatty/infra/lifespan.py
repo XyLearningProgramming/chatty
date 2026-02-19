@@ -54,18 +54,14 @@ def inject(
                 "raw_path": b"/",
                 "query_string": b"",
                 "root_path": "",
-                "headers": (
-                    (b"X-Request-Scope", b"lifespan"),
-                ),
+                "headers": ((b"X-Request-Scope", b"lifespan"),),
                 "client": ("localhost", 80),
                 "server": ("localhost", 80),
                 "state": app.state,
                 "app": app,
             }
         )
-        dependant = get_dependant(
-            path="/", call=partial(lifespan, app)
-        )
+        dependant = get_dependant(path="/", call=partial(lifespan, app))
 
         async with AsyncExitStack() as stack:
             solved = await solve_dependencies(

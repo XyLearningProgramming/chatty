@@ -7,8 +7,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from chatty.infra.db import (ChatMessageHistoryFactory,
-                             get_chat_message_history_factory)
+from chatty.infra.db import ChatMessageHistoryFactory, get_chat_message_history_factory
 from chatty.infra.db.callback import PGMessageCallback
 
 PgCallbackFactory = Callable[[str, str, str | None], PGMessageCallback]

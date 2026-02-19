@@ -9,9 +9,10 @@ Create Date: 2026-02-18
 from typing import Sequence, Union
 
 import sqlalchemy as sa
-from alembic import op
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import text
+
+from alembic import op
 
 revision: str = "0002"
 down_revision: Union[str, None] = "0001"
@@ -24,9 +25,7 @@ EMBEDDING_DIMENSIONS = 1024
 def upgrade() -> None:
     op.create_table(
         "source_embeddings",
-        sa.Column(
-            "id", sa.BigInteger(), autoincrement=True, nullable=False
-        ),
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("source_id", sa.String(), nullable=False),
         sa.Column("text", sa.String(), nullable=False),
         sa.Column(
@@ -61,11 +60,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        text(
-            "DROP INDEX IF EXISTS ix_source_embeddings_embedding_hnsw"
-        )
-    )
+    op.execute(text("DROP INDEX IF EXISTS ix_source_embeddings_embedding_hnsw"))
     op.drop_index(
         "uq_source_embeddings_source_text_model",
         table_name="source_embeddings",

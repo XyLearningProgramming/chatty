@@ -10,8 +10,9 @@ Uses ``asyncpg`` as the async driver — no separate sync driver needed.
 import asyncio
 import os
 
-from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
+
+from alembic import context
 
 # Import Base.metadata so --autogenerate can detect model changes.
 from chatty.infra.db.models import Base  # noqa: F401

@@ -13,7 +13,6 @@ from chatty.infra.concurrency.base import DuplicateRequest, RateLimited
 from chatty.infra.concurrency.guards import RequestGuard
 from chatty.infra.concurrency.real_ip import get_real_ip
 
-
 # =========================================================================
 # Real IP extraction
 # =========================================================================

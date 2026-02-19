@@ -9,10 +9,11 @@ Create Date: 2026-02-12
 from typing import Sequence, Union
 
 import sqlalchemy as sa
-from alembic import op
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "0001"
@@ -28,9 +29,7 @@ def upgrade() -> None:
 
     op.create_table(
         "chat_messages",
-        sa.Column(
-            "id", sa.BigInteger(), autoincrement=True, nullable=False
-        ),
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("conversation_id", sa.String(), nullable=False),
         sa.Column("trace_id", sa.String(), nullable=False),
         sa.Column("message_id", sa.String(), nullable=False),
@@ -84,14 +83,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        text(
-            "DROP INDEX IF EXISTS ix_chat_messages_query_embedding_hnsw"
-        )
-    )
-    op.drop_index(
-        "ix_chat_messages_created_at", table_name="chat_messages"
-    )
+    op.execute(text("DROP INDEX IF EXISTS ix_chat_messages_query_embedding_hnsw"))
+    op.drop_index("ix_chat_messages_created_at", table_name="chat_messages")
     op.drop_index(
         "ix_chat_messages_trace_id_created_at",
         table_name="chat_messages",

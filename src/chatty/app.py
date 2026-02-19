@@ -22,6 +22,7 @@ from chatty.infra.concurrency.inbox import build_inbox
 from chatty.infra.concurrency.semaphore import build_semaphore
 from chatty.infra.db_engine import build_db
 from chatty.infra.lifespan import inject
+from chatty.infra.logging import setup_logging
 from chatty.infra.telemetry import build_telemetry
 
 logger = logging.getLogger(__name__)
@@ -54,12 +55,11 @@ def _build_api_prefix(route_prefix: str) -> str:
 def get_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     config = get_app_config()
+    setup_logging(config.logging)
 
     app = FastAPI(
         title="Chatty",
-        description=(
-            "A persona-driven chatbot with multi-agent pipeline"
-        ),
+        description=("A persona-driven chatbot with multi-agent pipeline"),
         version="0.1.0",
         lifespan=lifespan,
     )
@@ -79,5 +79,6 @@ def get_app() -> FastAPI:
     app.include_router(health_router)
 
     return app
+
 
 app = get_app()

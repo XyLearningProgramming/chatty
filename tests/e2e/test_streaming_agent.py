@@ -155,9 +155,7 @@ class TestStreamingAgent:
                 )
 
     @pytest.mark.asyncio
-    async def test_conversation_history_support(
-        self, base_url: str, ensure_llm_server
-    ):
+    async def test_conversation_history_support(self, base_url: str, ensure_llm_server):
         """Test that conversation history is properly handled."""
         conversation_history = [
             {"role": "user", "content": "What is the capital of France?"},
@@ -196,9 +194,7 @@ class TestStreamingAgent:
                 assert len(grouped[EVENT_TYPE_CONTENT]) > 0
 
     @pytest.mark.asyncio
-    async def test_invalid_request_handling(
-        self, base_url: str, ensure_llm_server
-    ):
+    async def test_invalid_request_handling(self, base_url: str, ensure_llm_server):
         """Test handling of invalid requests."""
         # Test empty query
         async with httpx.AsyncClient() as client:
@@ -211,9 +207,7 @@ class TestStreamingAgent:
             assert response.status_code in [200, 400, 422]
 
     @pytest.mark.asyncio
-    async def test_long_query_handling(
-        self, base_url: str, ensure_llm_server
-    ):
+    async def test_long_query_handling(self, base_url: str, ensure_llm_server):
         """Test handling of very long queries."""
         # Create a query longer than CHAT_QUERY_MAX_LENGTH (1024)
         long_query = "What is " + "very " * 300 + "long question?"
@@ -338,9 +332,7 @@ class TestStreamingAgent:
                                     )
 
                     grouped = collect_events(events)
-                    full_response = full_content_text(
-                        grouped[EVENT_TYPE_CONTENT]
-                    )
+                    full_response = full_content_text(grouped[EVENT_TYPE_CONTENT])
 
                     print(
                         f"\nResponse preview: "
@@ -373,9 +365,7 @@ class TestStreamingAgent:
                         print("Agent correctly answered tech question")
 
     @pytest.mark.asyncio
-    async def test_concurrent_requests(
-        self, base_url: str, ensure_llm_server
-    ):
+    async def test_concurrent_requests(self, base_url: str, ensure_llm_server):
         """Test that multiple concurrent requests are handled properly."""
         queries = [
             "How do I use Git for version control?",

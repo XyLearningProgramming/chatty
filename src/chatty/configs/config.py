@@ -7,18 +7,18 @@ Priority order (highest first):
 
 1. Environment variables (``CHATTY_`` prefix)
 2. ``.env`` dotenv file
-3. YAML config (``configs/config.yaml`` -- baked into the Docker image,
-   replaced by the ConfigMap subPath mount in Kubernetes)
+3. YAML configs — loaded in order so later files override earlier ones:
+   a. ``configs/config.yaml`` (baked into the Docker image, replaced by
+      ConfigMap subPath mount in Kubernetes)
+   b. ``configs/prompt.yaml`` (prompt templates, mountable as a separate
+      ConfigMap for dynamic overwrite after deploy)
 4. Init defaults / field defaults
 5. File secrets
 """
 
 from pathlib import Path
-from typing import Any
 
-import yaml
 from pydantic import Field
-from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -34,6 +34,7 @@ from .system import (
     ConcurrencyConfig,
     EmbeddingConfig,
     LLMConfig,
+    LoggingConfig,
     PromptConfig,
     RagConfig,
     ThirdPartyConfig,
@@ -52,8 +53,10 @@ CONFIG_DIR = PROJECT_ROOT / "configs"
 # in Kubernetes the ConfigMap is mounted over this path via subPath.
 STATIC_CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
-# Prompt configuration file
-PROMPT_CONFIG_FILE = CONFIG_DIR / "prompt.yml"
+# Prompt configuration file.  Parsed after config.yaml so prompt
+# values override any overlapping keys.  Mountable as a separate
+# ConfigMap for dynamic overwrite after deploy.
+PROMPT_CONFIG_FILE = CONFIG_DIR / "prompt.yaml"
 
 DOTENV_FILE_PATH = PROJECT_ROOT / ".env"
 ENV_DELIMITER = "__"  # Nested environment variable delimiter
@@ -77,7 +80,7 @@ class AppConfig(BaseSettings):
         env_prefix=ENV_PREFIX,
         case_sensitive=False,
         extra="ignore",
-        yaml_file=STATIC_CONFIG_FILE,
+        yaml_file=[STATIC_CONFIG_FILE, PROMPT_CONFIG_FILE],
         yaml_file_encoding=DEFAULT_ENCODING,
     )
 
@@ -130,6 +133,11 @@ class AppConfig(BaseSettings):
         description="System prompt configuration",
     )
 
+    logging: LoggingConfig = Field(
+        default_factory=LoggingConfig,
+        description="Structured logging configuration",
+    )
+
     tracing: TracingConfig = Field(
         default_factory=TracingConfig,
         description="OpenTelemetry tracing configuration",
@@ -150,11 +158,8 @@ class AppConfig(BaseSettings):
         sources.append(env_settings)
         sources.append(dotenv_settings)
 
-        # 3. YAML config (baked into image / replaced by ConfigMap in k8s)
+        # 3. YAML configs (config.yaml + prompt.yaml, loaded in order)
         sources.append(YamlConfigSettingsSource(settings_cls))
-
-        # 3.5. Prompt YAML (separate file)
-        sources.append(_PromptYamlSettingsSource(settings_cls))
 
         # 4-5. Init defaults and file secrets
         sources.append(init_settings)
@@ -163,38 +168,11 @@ class AppConfig(BaseSettings):
         return tuple(sources)
 
 
-class _PromptYamlSettingsSource(PydanticBaseSettingsSource):
-    """Loads ``prompt.yml`` and validates it against :class:`PromptConfig`.
-
-    The YAML is run through ``PromptConfig.model_validate`` so type
-    errors surface immediately with clear Pydantic messages instead
-    of propagating as opaque dicts.
-    """
-
-    def get_field_value(
-        self, field: FieldInfo, field_name: str
-    ) -> tuple[Any, str, bool]:
-        return None, field_name, False
-
-    def __call__(self) -> dict[str, Any]:
-        if not PROMPT_CONFIG_FILE.exists():
-            return {}
-
-        with open(PROMPT_CONFIG_FILE, encoding=DEFAULT_ENCODING) as f:
-            data = yaml.safe_load(f)
-
-        if not isinstance(data, dict):
-            return {}
-
-        prompt = PromptConfig.model_validate(data)
-        return {"prompt": prompt.model_dump()}
-
-
 def get_app_config() -> AppConfig:
     """Get the application configuration.
 
-    Re-reads ``configs/config.yaml`` on every call so that changes are
-    picked up immediately.
+    Re-reads ``configs/config.yaml`` and ``configs/prompt.yaml`` on every
+    call so that changes are picked up immediately.
     """
     return AppConfig()
 

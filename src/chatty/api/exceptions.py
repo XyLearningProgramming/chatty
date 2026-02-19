@@ -35,9 +35,7 @@ async def build_exception_handlers(
         )
 
     @app.exception_handler(RateLimited)
-    async def handle_rate_limited(
-        request: Request, exc: RateLimited
-    ) -> JSONResponse:
+    async def handle_rate_limited(request: Request, exc: RateLimited) -> JSONResponse:
         RATE_LIMIT_REJECTIONS_TOTAL.labels(scope=exc.scope).inc()
         return JSONResponse(
             status_code=429,
@@ -56,9 +54,7 @@ async def build_exception_handlers(
         )
 
     @app.exception_handler(InboxFull)
-    async def handle_inbox_full(
-        request: Request, exc: InboxFull
-    ) -> JSONResponse:
+    async def handle_inbox_full(request: Request, exc: InboxFull) -> JSONResponse:
         INBOX_REJECTIONS_TOTAL.inc()
         return JSONResponse(
             status_code=429,

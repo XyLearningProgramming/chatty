@@ -20,8 +20,8 @@ from chatty.infra.db import (
     get_chat_message_history_factory,
 )
 from chatty.infra.db.cache import CacheRepository
-from chatty.infra.db.embedding import EmbeddingRepository
 from chatty.infra.db.deps import get_cache_repository
+from chatty.infra.db.embedding import EmbeddingRepository
 
 from .callback import PgCallbackFactory, get_pg_callback_factory
 from .models import ChatService
@@ -44,10 +44,13 @@ def get_chat_service(
     config: Annotated[AppConfig, Depends(get_app_config)],
     pg_callback_factory: Annotated[PgCallbackFactory, Depends(get_pg_callback_factory)],
     embedder: Annotated[GatedEmbedModel, Depends(get_embedder)],
-    embedding_repository: Annotated[EmbeddingRepository, Depends(get_embedding_repository)],
+    embedding_repository: Annotated[
+        EmbeddingRepository, Depends(get_embedding_repository)
+    ],
     cache_repository: Annotated[CacheRepository, Depends(get_cache_repository)],
     history_factory: Annotated[
-        ChatMessageHistoryFactory, Depends(get_chat_message_history_factory),
+        ChatMessageHistoryFactory,
+        Depends(get_chat_message_history_factory),
     ],
 ) -> ChatService:
     """Create a configured chat service per request.
@@ -66,8 +69,12 @@ def get_chat_service(
 
     if agent_cls is RagChatService:
         return agent_cls(
-            llm, config, embedder, embedding_repository,
-            history_factory, cache_repository,
+            llm,
+            config,
+            embedder,
+            embedding_repository,
+            history_factory,
+            cache_repository,
         )
 
     raise NotImplementedError(f"Agent {name} is not implemented.")

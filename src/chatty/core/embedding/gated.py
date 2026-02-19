@@ -12,7 +12,10 @@ import time
 import openai
 
 from chatty.configs.system import EmbeddingConfig
-from chatty.core.service.metrics import EMBEDDING_CALLS_IN_FLIGHT, EMBEDDING_LATENCY_SECONDS
+from chatty.core.service.metrics import (
+    EMBEDDING_CALLS_IN_FLIGHT,
+    EMBEDDING_LATENCY_SECONDS,
+)
 from chatty.infra.concurrency.semaphore import ModelSemaphore
 from chatty.infra.telemetry import (
     ATTR_EMBEDDING_MODEL,
@@ -55,14 +58,18 @@ class GatedEmbedModel:
             )
             start = time.monotonic()
             async with self._semaphore.slot():
-                EMBEDDING_CALLS_IN_FLIGHT.labels(model_name=self._config.model_name).inc()
+                EMBEDDING_CALLS_IN_FLIGHT.labels(
+                    model_name=self._config.model_name
+                ).inc()
                 try:
                     response = await self._openai.embeddings.create(
                         input=text,
                         model=self._config.model_name,
                     )
                 finally:
-                    EMBEDDING_CALLS_IN_FLIGHT.labels(model_name=self._config.model_name).dec()
+                    EMBEDDING_CALLS_IN_FLIGHT.labels(
+                        model_name=self._config.model_name
+                    ).dec()
             EMBEDDING_LATENCY_SECONDS.labels(operation="embed").observe(
                 time.monotonic() - start
             )

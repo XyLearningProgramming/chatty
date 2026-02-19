@@ -70,10 +70,4 @@ class ErrorEvent(BaseModel):
     code: str | None = Field(default=None, description="Error code")
 
 
-StreamEvent = (
-    QueuedEvent
-    | ThinkingEvent
-    | ContentEvent
-    | ToolCallEvent
-    | ErrorEvent
-)
+StreamEvent = QueuedEvent | ThinkingEvent | ContentEvent | ToolCallEvent | ErrorEvent

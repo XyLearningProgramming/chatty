@@ -41,9 +41,7 @@ class ModelSemaphore:
             result = await inner_model._agenerate(...)
     """
 
-    def __init__(
-        self, backend: SemaphoreBackend, acquire_timeout: timedelta
-    ) -> None:
+    def __init__(self, backend: SemaphoreBackend, acquire_timeout: timedelta) -> None:
         self._backend = backend
         self._acquire_timeout = acquire_timeout.total_seconds()
 
@@ -64,8 +62,7 @@ class ModelSemaphore:
             SEMAPHORE_ACQUIRES_TOTAL.labels(result="timeout").inc()
             logger.debug("Semaphore acquire timed out after %.3fs", elapsed)
             raise AcquireTimeout(
-                "Timed out waiting for a model concurrency slot. "
-                "Try again later."
+                "Timed out waiting for a model concurrency slot. Try again later."
             ) from None
         elapsed = time.monotonic() - start
         SEMAPHORE_WAIT_SECONDS.observe(elapsed)
@@ -118,23 +115,18 @@ async def build_semaphore(
             acquire_timeout=cc.acquire_timeout,
         )
         logger.info(
-            "ModelSemaphore: Redis backend "
-            "(max_concurrency=%d, keys=%s)",
+            "ModelSemaphore: Redis backend (max_concurrency=%d, keys=%s)",
             cc.max_concurrency,
             slots_key,
         )
     else:
-        backend = LocalSemaphoreBackend(
-            max_concurrency=cc.max_concurrency
-        )
+        backend = LocalSemaphoreBackend(max_concurrency=cc.max_concurrency)
         logger.info(
             "ModelSemaphore: local backend (max_concurrency=%d)",
             cc.max_concurrency,
         )
 
-    semaphore = ModelSemaphore(
-        backend, acquire_timeout=cc.acquire_timeout
-    )
+    semaphore = ModelSemaphore(backend, acquire_timeout=cc.acquire_timeout)
     app.state.semaphore = semaphore
     yield
     await semaphore.aclose()

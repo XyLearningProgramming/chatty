@@ -61,6 +61,7 @@ SPAN_TOOL_URL_DISPATCHER = "tool.url_dispatcher"
 SPAN_SEMAPHORE_SLOT = "semaphore.slot"
 SPAN_INBOX_ENTER = "inbox.enter"
 SPAN_HISTORY_LOAD = "history.load"
+SPAN_SSE_STREAM = "sse.stream"
 
 # ---------------------------------------------------------------------------
 # Span attribute keys
@@ -91,6 +92,10 @@ ATTR_INBOX_REJECTED = "inbox.rejected"
 
 ATTR_HISTORY_CONVERSATION_ID = "history.conversation_id"
 ATTR_HISTORY_MESSAGE_COUNT = "history.message_count"
+
+ATTR_SSE_ERROR_CODE = "sse.error_code"
+ATTR_SSE_EVENT_COUNTS = "sse.event_counts"
+ATTR_SSE_SERVICE = "sse.service"
 
 
 def init_telemetry(

@@ -58,9 +58,7 @@ class URLDispatcherTool(BaseTool):
             if src is None:
                 span.set_attribute(ATTR_TOOL_ERROR, "invalid_source")
                 valid = ", ".join(f'"{k}"' for k in self.sources)
-                return self._prompt.render_tool_error(
-                    source=source, valid=valid
-                )
+                return self._prompt.render_tool_error(source=source, valid=valid)
             return await src.get_content(
                 HttpClient.get,
                 extra_processors=self.action_processors or None,
@@ -76,9 +74,7 @@ class URLDispatcherTool(BaseTool):
         prompt: PromptConfig,
     ) -> Self:
         """Build one dispatcher from a ``ToolDeclaration``."""
-        tool_sources = {
-            sid: sources[sid] for sid in declaration.sources
-        }
+        tool_sources = {sid: sources[sid] for sid in declaration.sources}
 
         descriptions: dict[str, str] = {}
         for sid, src in tool_sources.items():

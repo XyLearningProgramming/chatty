@@ -58,7 +58,6 @@ from .metrics import (
     RAG_CACHE_LOOKUPS_TOTAL,
     RAG_RETRIEVAL_LATENCY_SECONDS,
     RAG_SOURCES_RETURNED,
-    observe_stream_response,
 )
 from .models import ChatContext, ChatService, ContentEvent, StreamEvent
 
@@ -95,6 +94,11 @@ KEY_CACHE_HIT = "cache_hit"
 KEY_TOP_RESULTS = "top_results"
 KEY_ENRICHED_PROMPT = "enriched_prompt"
 KEY_RESPONSE_TEXT = "response_text"
+
+# ---------------------------------------------------------------------------
+# Prompt constants
+# ---------------------------------------------------------------------------
+PROMPT_RAG_LINE_BREAK = "\n\n"
 
 # ---------------------------------------------------------------------------
 # Graph state
@@ -243,9 +247,7 @@ class RagChatService(ChatService):
         try:
             await self._current_history.aadd_messages([human, ai])
         except Exception:
-            logger.warning(
-                "Failed to record cached messages", exc_info=True
-            )
+            logger.warning("Failed to record cached messages", exc_info=True)
         return {}
 
     # ------------------------------------------------------------------
@@ -254,7 +256,9 @@ class RagChatService(ChatService):
 
     async def _retrieve_topk_node(self, state: RagState) -> dict:
         with tracer.start_as_current_span(SPAN_RAG_RETRIEVE) as span:
-            span.set_attribute(ATTR_RAG_THRESHOLD, self._rag_config.similarity_threshold)
+            span.set_attribute(
+                ATTR_RAG_THRESHOLD, self._rag_config.similarity_threshold
+            )
             span.set_attribute(ATTR_RAG_TOP_K, self._rag_config.top_k)
 
             start = time.monotonic()
@@ -305,15 +309,20 @@ class RagChatService(ChatService):
     # ------------------------------------------------------------------
 
     def _build_prompt_node(self, state: RagState) -> dict:
+        prompt_cfg = self._config.prompt
         context_parts: list[str] = []
         for source_id, content, sim in state.get(KEY_TOP_RESULTS, []):
             context_parts.append(
-                f"### {source_id} (relevance: {sim:.2f})\n{content}"
+                prompt_cfg.render_rag_context_section(
+                    source_id=source_id,
+                    similarity=sim,
+                    content=content,
+                )
             )
 
-        enriched = self._config.prompt.render_rag_prompt(
+        enriched = prompt_cfg.render_rag_prompt(
             base=self._system_prompt,
-            content="\n\n".join(context_parts),
+            content=PROMPT_RAG_LINE_BREAK.join(context_parts),
         )
         return {KEY_ENRICHED_PROMPT: enriched}
 
@@ -321,9 +330,7 @@ class RagChatService(ChatService):
     # Node: generate  (LLM call — tokens streamed via stream_mode)
     # ------------------------------------------------------------------
 
-    async def _generate_node(
-        self, state: RagState, config: RunnableConfig
-    ) -> dict:
+    async def _generate_node(self, state: RagState, config: RunnableConfig) -> dict:
         embed = (
             state.get(KEY_QUERY_EMBEDDING)
             if state.get(KEY_IS_FIRST_TURN) and self._cache_config.enabled
@@ -346,16 +353,6 @@ class RagChatService(ChatService):
     async def stream_response(
         self, ctx: ChatContext
     ) -> AsyncGenerator[StreamEvent, None]:
-        """Stream domain events, wrapping with metrics."""
-        decorated = observe_stream_response(self.chat_service_name)(
-            self._stream_response
-        )
-        async for event in decorated(ctx):
-            yield event
-
-    async def _stream_response(
-        self, ctx: ChatContext
-    ) -> AsyncGenerator[StreamEvent, None]:
         """Execute the RAG graph and yield domain events.
 
         Uses dual ``stream_mode=["messages", "updates"]``:
@@ -367,7 +364,8 @@ class RagChatService(ChatService):
             span.set_attribute(ATTR_RAG_QUERY_LEN, len(ctx.query))
 
             history = self._history_factory(
-                ctx.conversation_id, trace_id=ctx.trace_id,
+                ctx.conversation_id,
+                trace_id=ctx.trace_id,
             )
             self._current_history = history
             pg_callback = PGMessageCallback(
@@ -397,6 +395,4 @@ class RagChatService(ChatService):
                         continue
                     cache_update = data.get(NODE_CACHE_CHECK)
                     if cache_update and cache_update.get(KEY_CACHE_HIT):
-                        yield ContentEvent(
-                            content=cache_update[KEY_CACHE_HIT]
-                        )
+                        yield ContentEvent(content=cache_update[KEY_CACHE_HIT])

@@ -191,6 +191,26 @@ class RagConfig(BaseModel):
         default=30,
         description="Seconds between embedding cron ticks",
     )
+    cron_batch_size: int = Field(
+        default=1,
+        description="Max hints to embed per cron tick. "
+        "Keeps each tick lightweight by spreading work across ticks.",
+    )
+
+
+class LoggingConfig(BaseModel):
+    """Structured logging configuration."""
+
+    level: str = Field(
+        default="INFO",
+        description="Root log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+    )
+    json_output: bool = Field(
+        default=True,
+        alias="json",
+        description="Emit JSON lines (prod). "
+        "Set to false for human-readable dev output.",
+    )
 
 
 class TracingConfig(BaseModel):
@@ -230,7 +250,7 @@ class PromptConfig(BaseModel):
     """System prompt configuration.
 
     All templates use Jinja2 syntax and are loaded from
-    ``configs/prompt.yml``.
+    ``configs/prompt.yaml``.
     """
 
     # --- system / RAG prompts ---
@@ -246,6 +266,12 @@ class PromptConfig(BaseModel):
         "Receives {{ base }} (rendered system_prompt) and {{ content }} "
         "(retrieved context block). Required when using the RAG chat service.",
     )
+    rag_context_section: str = Field(
+        default="",
+        description="Jinja2 template for a single RAG context section. "
+        "Receives {{ source_id }}, {{ similarity }}, and {{ content }}. "
+        "Sections are joined with double newlines to form the full context block.",
+    )
 
     # --- tool prompts ---
 
@@ -260,8 +286,7 @@ class PromptConfig(BaseModel):
     )
     tool_source_hint: str = Field(
         default="",
-        description="Jinja2 fallback per-source description. "
-        "Receives {{ source_id }}.",
+        description="Jinja2 fallback per-source description. Receives {{ source_id }}.",
     )
     tool_error_unknown_source: str = Field(
         default="",
@@ -280,13 +305,16 @@ class PromptConfig(BaseModel):
         raw = (self.system_prompt or "").strip()
         if not raw:
             raise ValueError(
-                "system_prompt is required. "
-                "Set it in configs/prompt.yml."
+                "system_prompt is required. Set it in configs/prompt.yaml."
             )
         return Template(raw).render(
             persona_name=persona.name,
-            persona_character=", ".join(persona.character) if persona.character else None,
-            persona_expertise=", ".join(persona.expertise) if persona.expertise else None,
+            persona_character=", ".join(persona.character)
+            if persona.character
+            else None,
+            persona_expertise=", ".join(persona.expertise)
+            if persona.expertise
+            else None,
         )
 
     def render_rag_prompt(self, *, base: str, content: str) -> str:
@@ -296,14 +324,22 @@ class PromptConfig(BaseModel):
         raw = (self.rag_system_prompt or "").strip()
         if not raw:
             raise ValueError(
-                "rag_system_prompt is required. "
-                "Set it in configs/prompt.yml."
+                "rag_system_prompt is required. Set it in configs/prompt.yaml."
             )
         return Template(raw).render(base=base, content=content)
 
-    def render_tool_source_field(
-        self, options: dict[str, str]
+    def render_rag_context_section(
+        self, *, source_id: str, similarity: float, content: str
     ) -> str:
+        """Render a single RAG context section heading + body."""
+        return self._render(
+            self.rag_context_section,
+            source_id=source_id,
+            similarity=similarity,
+            content=content,
+        )
+
+    def render_tool_source_field(self, options: dict[str, str]) -> str:
         """Render the ``source`` field description for tool schemas."""
         return self._render(self.tool_source_field, options=options)
 
@@ -313,6 +349,4 @@ class PromptConfig(BaseModel):
 
     def render_tool_error(self, *, source: str, valid: str) -> str:
         """Render the unknown-source error message."""
-        return self._render(
-            self.tool_error_unknown_source, source=source, valid=valid
-        )
+        return self._render(self.tool_error_unknown_source, source=source, valid=valid)

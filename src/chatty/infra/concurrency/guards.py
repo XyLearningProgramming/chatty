@@ -78,9 +78,7 @@ class RequestGuard:
     # Redis path — single pipeline
     # -----------------------------------------------------------------
 
-    async def _check_redis(
-        self, ip: str, query: str, nonce: str | None
-    ) -> None:
+    async def _check_redis(self, ip: str, query: str, nonce: str | None) -> None:
         now = time.time()
         window_start = now - self._rate_window
         member = str(now)
@@ -140,9 +138,7 @@ class RequestGuard:
     # Local fallback path
     # -----------------------------------------------------------------
 
-    def _check_local(
-        self, ip: str, query: str, nonce: str | None
-    ) -> None:
+    def _check_local(self, ip: str, query: str, nonce: str | None) -> None:
         now = time.time()
 
         # Per-IP rate limit
@@ -165,11 +161,11 @@ class RequestGuard:
 
         # Fingerprint dedup
         if self._fp_ttl > 0:
-            fp_digest = hashlib.sha256(
-                f"{ip}:{query}".encode()
-            ).hexdigest()[:16]
+            fp_digest = hashlib.sha256(f"{ip}:{query}".encode()).hexdigest()[:16]
             fp_key = _DEDUP_FP_KEY.format(digest=fp_digest)
-            if self._check_local_seen(self._local_fingerprints, fp_key, self._fp_ttl, now):
+            if self._check_local_seen(
+                self._local_fingerprints, fp_key, self._fp_ttl, now
+            ):
                 raise DuplicateRequest("Duplicate request detected")
 
         # Nonce dedup

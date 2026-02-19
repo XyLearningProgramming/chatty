@@ -121,8 +121,7 @@ class RedisInboxBackend(InboxBackend):
         count = int(result)
         if count == -1:
             raise InboxFull(
-                f"Inbox full ({self._inbox_max_size}): "
-                "too many requests in flight."
+                f"Inbox full ({self._inbox_max_size}): too many requests in flight."
             )
         return count
 
@@ -209,8 +208,7 @@ class RedisSemaphoreBackend(SemaphoreBackend):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise AcquireTimeout(
-                        "Timed out waiting for a concurrency slot. "
-                        "Try again later."
+                        "Timed out waiting for a concurrency slot. Try again later."
                     )
 
                 # Block on the socket for up to ``remaining`` seconds.

@@ -43,8 +43,7 @@ def test_singleton_get_app_config():
     assert "current_homepage" in config1.persona.sources
     assert "resume" in config1.persona.sources
     assert (
-        config1.persona.sources["current_homepage"].content_url
-        == "https://x3huang.dev"
+        config1.persona.sources["current_homepage"].content_url == "https://x3huang.dev"
     )
 
     # Verify tools loaded

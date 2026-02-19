@@ -59,6 +59,11 @@ rag:
   similarity_threshold: 0.7
   cron_interval: 30
 
+# --- Logging ---
+logging:
+  level: INFO
+  json_output: true         # false for human-readable dev output
+
 # --- Tracing (secrets via env: CHATTY_TRACING__ENDPOINT, etc.) ---
 tracing:
   enabled: false

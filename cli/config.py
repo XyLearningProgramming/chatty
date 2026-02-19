@@ -1,7 +1,5 @@
 """Configuration management for the CLI tool."""
 
-import os
-
 from pydantic import BaseModel, Field
 
 

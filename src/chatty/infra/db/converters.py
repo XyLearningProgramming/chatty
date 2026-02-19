@@ -43,7 +43,10 @@ from .models import ChatMessage, StoredToolCall
 
 _VALID_ROLES = (ROLE_SYSTEM, ROLE_HUMAN, ROLE_AI, ROLE_TOOL)
 _EXTRA_PASSTHROUGH_KEYS = (
-    EXTRA_RUN_ID, EXTRA_PARENT_RUN_ID, EXTRA_MODEL_NAME, EXTRA_CACHE_HIT,
+    EXTRA_RUN_ID,
+    EXTRA_PARENT_RUN_ID,
+    EXTRA_MODEL_NAME,
+    EXTRA_CACHE_HIT,
 )
 
 
@@ -68,14 +71,10 @@ def row_to_message(row: Any) -> BaseMessage | None:
         tool_calls: list[StoredToolCall] = []
         if extra and EXTRA_TOOL_CALLS in extra:
             tool_calls = [
-                StoredToolCall(
-                    name=tc["name"], args=tc["args"], id=tc["id"]
-                )
+                StoredToolCall(name=tc["name"], args=tc["args"], id=tc["id"])
                 for tc in extra[EXTRA_TOOL_CALLS]
             ]
-        return AIMessage(
-            content=content, id=message_id, tool_calls=tool_calls
-        )
+        return AIMessage(content=content, id=message_id, tool_calls=tool_calls)
     if role == ROLE_TOOL:
         tool_call_id = (extra or {}).get(EXTRA_TOOL_CALL_ID, "")
         tool_name = (extra or {}).get(EXTRA_TOOL_NAME, DEFAULT_TOOL_NAME)
@@ -220,9 +219,7 @@ def cached_response_to_ai_message(
 # ------------------------------------------------------------------
 
 
-def run_extra(
-    run_id: UUID, parent_run_id: UUID | None
-) -> dict[str, str]:
+def run_extra(run_id: UUID, parent_run_id: UUID | None) -> dict[str, str]:
     """Build ``additional_kwargs`` with run lineage for a new BaseMessage."""
     extra: dict[str, str] = {EXTRA_RUN_ID: str(run_id)}
     if parent_run_id:
@@ -309,9 +306,7 @@ def tool_message_from_output(
     tool_name: str,
 ) -> ToolMessage:
     """Build a ToolMessage from ``on_tool_end`` output."""
-    content = (
-        str(output.content) if hasattr(output, "content") else str(output)
-    )
+    content = str(output.content) if hasattr(output, "content") else str(output)
     tool_call_id = getattr(output, "tool_call_id", None) or ""
 
     extra_kw = run_extra(run_id, parent_run_id)

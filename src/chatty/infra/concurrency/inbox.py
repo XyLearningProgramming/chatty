@@ -10,9 +10,9 @@ from fastapi import Depends, FastAPI, Request
 from redis.asyncio import Redis
 
 from chatty.configs.config import AppConfig, get_app_config
+from chatty.core.service.metrics import INBOX_OCCUPANCY
 from chatty.infra.lifespan import get_app
 from chatty.infra.redis import build_redis
-from chatty.core.service.metrics import INBOX_OCCUPANCY
 from chatty.infra.telemetry import (
     ATTR_INBOX_POSITION,
     ATTR_INBOX_REJECTED,

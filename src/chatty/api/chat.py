@@ -138,6 +138,7 @@ async def chat(
         sse_stream(
             _chat_events(ctx, chat_service, position, request.is_disconnected),
             request_timeout=api_config.request_timeout,
+            service_name=chat_service.chat_service_name,
         ),
         media_type=STREAMING_RESPONSE_MEDIA_TYPE,
         headers={

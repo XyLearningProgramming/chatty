@@ -46,9 +46,10 @@ class TestConstants:
         """Each model's default type field matches the constant."""
         assert ThinkingEvent(content="x").type == EVENT_TYPE_THINKING
         assert ContentEvent(content="x").type == EVENT_TYPE_CONTENT
-        assert ToolCallEvent(
-            name="t", status=TOOL_STATUS_STARTED
-        ).type == EVENT_TYPE_TOOL_CALL
+        assert (
+            ToolCallEvent(name="t", status=TOOL_STATUS_STARTED).type
+            == EVENT_TYPE_TOOL_CALL
+        )
         assert ErrorEvent(message="m").type == EVENT_TYPE_ERROR
 
 

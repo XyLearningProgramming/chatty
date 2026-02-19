@@ -39,9 +39,7 @@ AsyncSessionDep = Annotated[AsyncSession, Depends(get_async_session)]
 SessionFactoryDep = Annotated[
     async_sessionmaker[AsyncSession], Depends(get_session_factory)
 ]
-PgCallbackFactoryDep = Annotated[
-    PgCallbackFactory, Depends(get_pg_callback_factory)
-]
+PgCallbackFactoryDep = Annotated[PgCallbackFactory, Depends(get_pg_callback_factory)]
 ChatMessageHistoryFactoryDep = Annotated[
     ChatMessageHistoryFactory, Depends(get_chat_message_history_factory)
 ]

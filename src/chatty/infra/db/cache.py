@@ -56,7 +56,8 @@ SQL_SEARCH_CACHED_RESPONSE = f"""
         WHERE {COL_ROLE} = '{ROLE_HUMAN}'
           AND {COL_QUERY_EMBEDDING} IS NOT NULL
           AND {COL_CREATED_AT} >= now() - :{PARAM_TTL_INTERVAL}::interval
-          AND 1 - ({COL_QUERY_EMBEDDING} <=> :{PARAM_QUERY_VEC}::vector) >= :{PARAM_THRESHOLD}
+          AND 1 - ({COL_QUERY_EMBEDDING} <=> :{PARAM_QUERY_VEC}::vector)
+            >= :{PARAM_THRESHOLD}
         ORDER BY {COL_QUERY_EMBEDDING} <=> :{PARAM_QUERY_VEC}::vector
         LIMIT 1
     ) AS human

@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request
+from openai import APIConnectionError
 
 from chatty.configs.config import AppConfig, get_app_config
 from chatty.core.service.metrics import (
@@ -60,16 +61,16 @@ class EmbeddingCron:
         embedder: GatedEmbedModel,
         repository: EmbeddingRepository,
         interval: int,
+        batch_size: int,
     ) -> None:
         self.embedder = embedder
         self.repository = repository
         self._interval = interval
+        self._batch_size = batch_size
         self._task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
-        self._task = asyncio.create_task(
-            self._loop(), name="embedding-cron"
-        )
+        self._task = asyncio.create_task(self._loop(), name="embedding-cron")
         logger.info(
             "Embedding cron started (interval=%ds)",
             self._interval,
@@ -93,9 +94,7 @@ class EmbeddingCron:
             try:
                 await self._tick()
             except asyncio.CancelledError:
-                logger.info(
-                    "Embedding cron cancelled, shutting down."
-                )
+                logger.info("Embedding cron cancelled, shutting down.")
                 return
             except Exception:
                 logger.exception("Embedding cron tick failed")
@@ -108,48 +107,57 @@ class EmbeddingCron:
 
             existing = await self.repository.all_existing_texts(model_name)
 
-            embedded = 0
-            total_pending = 0
+            pending: list[tuple[str, str]] = []
             for decl in config.persona.embed:
                 for hint in decl.match_hints:
-                    if not hint or (decl.source, hint) in existing:
-                        continue
-                    total_pending += 1
+                    if hint and (decl.source, hint) not in existing:
+                        pending.append((decl.source, hint))
 
-                    try:
-                        vec = await self.embedder.embed(hint)
-                        await self.repository.upsert(
-                            decl.source, hint, vec, model_name
-                        )
-                        embedded += 1
-                        EMBEDDING_CRON_HINTS_TOTAL.inc()
-                        logger.info(
-                            "Cron: embedded hint '%s' for source '%s'",
-                            hint,
-                            decl.source,
-                        )
-                    except AcquireTimeout:
-                        EMBEDDING_CRON_RUNS_TOTAL.labels(status="skipped").inc()
-                        logger.debug(
-                            "Cron: semaphore busy, skipping hint '%s'",
-                            hint,
-                        )
-                    except Exception:
-                        EMBEDDING_CRON_RUNS_TOTAL.labels(status="error").inc()
-                        logger.warning(
-                            "Cron: failed to embed hint '%s' for source '%s'",
-                            hint,
-                            decl.source,
-                            exc_info=True,
-                        )
+            batch = pending[: self._batch_size]
+            total_pending = len(pending)
+            embedded = 0
+            model_down = False
+            for source, hint in batch:
+                try:
+                    vec = await self.embedder.embed(hint)
+                    await self.repository.upsert(source, hint, vec, model_name)
+                    embedded += 1
+                    EMBEDDING_CRON_HINTS_TOTAL.inc()
+                    logger.info(
+                        "Cron: embedded hint '%s' for source '%s'",
+                        hint,
+                        source,
+                    )
+                except AcquireTimeout:
+                    EMBEDDING_CRON_RUNS_TOTAL.labels(status="skipped").inc()
+                    logger.debug(
+                        "Cron: semaphore busy, skipping hint '%s'",
+                        hint,
+                    )
+                except APIConnectionError:
+                    EMBEDDING_CRON_RUNS_TOTAL.labels(status="unreachable").inc()
+                    logger.warning(
+                        "Cron: embedding model unreachable, "
+                        "skipping remaining hints until next tick"
+                    )
+                    model_down = True
+                    break
+                except Exception:
+                    EMBEDDING_CRON_RUNS_TOTAL.labels(status="error").inc()
+                    logger.warning(
+                        "Cron: failed to embed hint '%s' for source '%s'",
+                        hint,
+                        source,
+                        exc_info=True,
+                    )
 
             span.set_attribute(ATTR_CRON_EMBEDDED, embedded)
             span.set_attribute(ATTR_CRON_TOTAL_PENDING, total_pending)
+            if model_down:
+                return
             EMBEDDING_CRON_RUNS_TOTAL.labels(status="ok").inc()
             if total_pending > 0:
-                logger.info(
-                    "Cron tick: embedded %d/%d hints", embedded, total_pending
-                )
+                logger.info("Cron tick: embedded %d/%d hints", embedded, total_pending)
 
 
 # ------------------------------------------------------------------
@@ -188,6 +196,7 @@ async def build_cron(
         embedder=embedder,
         repository=repo,
         interval=config.rag.cron_interval,
+        batch_size=config.rag.cron_batch_size,
     )
     app.state.embedder = embedder
     app.state.embedding_repository = repo

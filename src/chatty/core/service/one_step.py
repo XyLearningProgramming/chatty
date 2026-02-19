@@ -15,7 +15,6 @@ from langchain_core.messages import HumanMessage
 from chatty.configs.config import AppConfig
 
 from .callback import PgCallbackFactory
-from .metrics import observe_stream_response
 from .models import (
     LANGGRAPH_CONFIG_KEY_CALLBACKS,
     LANGGRAPH_INPUT_KEY_MESSAGES,
@@ -51,16 +50,6 @@ class OneStepChatService(ChatService):
         self._system_prompt = config.prompt.render_system_prompt(config.persona)
 
     async def stream_response(
-        self, ctx: ChatContext
-    ) -> AsyncGenerator[StreamEvent, None]:
-        """Stream domain events, wrapping with metrics."""
-        decorated = observe_stream_response(self.chat_service_name)(
-            self._stream_response
-        )
-        async for event in decorated(ctx):
-            yield event
-
-    async def _stream_response(
         self, ctx: ChatContext
     ) -> AsyncGenerator[StreamEvent, None]:
         """Execute the LangGraph agent and yield domain events."""

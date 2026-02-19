@@ -24,6 +24,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
     "opentelemetry-instrumentation-httpx>=0.41b0",
+    "python-json-logger>=3.2,<4",
     "numpy>=1.26",
     "openai>=1.0",
     "pgvector>=0.4.2",
@@ -37,7 +38,7 @@ select = ["C", "E", "F", "I", "W"]
 
 [tool.ruff]
 line-length = 88
-# extend-exclude = ["tests"]
+extend-exclude = ["cli", "tests"]
 
 [tool.coverage.run]
 source = ["src/chatty"]

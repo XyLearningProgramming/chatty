@@ -47,7 +47,7 @@ check: lint typecheck
 
 # Development
 dev:
-	uv run uvicorn chatty.app:app --host 0.0.0.0 --port 8080 --reload
+	uv run --env-file .env uvicorn chatty.app:app --host 0.0.0.0 --port 8080 --reload
 
 # Database
 db-upgrade:

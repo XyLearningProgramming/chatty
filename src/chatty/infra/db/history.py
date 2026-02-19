@@ -83,9 +83,7 @@ class PgChatMessageHistory(BaseChatMessageHistory):
                 )
                 return []
             messages = [
-                m
-                for row in reversed(rows)
-                if (m := row_to_message(row)) is not None
+                m for row in reversed(rows) if (m := row_to_message(row)) is not None
             ]
             span.set_attribute(ATTR_HISTORY_MESSAGE_COUNT, len(messages))
             logger.debug(
@@ -100,9 +98,7 @@ class PgChatMessageHistory(BaseChatMessageHistory):
         if not self.trace_id:
             raise ValueError("trace_id is required for aadd_messages")
         for msg in messages:
-            chat_msg = message_to_chat_message(
-                msg, self.conversation_id, self.trace_id
-            )
+            chat_msg = message_to_chat_message(msg, self.conversation_id, self.trace_id)
             try:
                 async with self._session_factory() as session:
                     session.add(chat_msg)

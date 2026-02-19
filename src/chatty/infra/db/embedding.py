@@ -83,9 +83,7 @@ async def search(
 
     Returns (source_id, similarity) tuples sorted by similarity, highest first.
     """
-    query_vec_str = (
-        "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
-    )
+    query_vec_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
     result = await session.execute(
         text(SQL_SEARCH),
         {
@@ -95,10 +93,7 @@ async def search(
             PARAM_LIMIT: top_k,
         },
     )
-    return [
-        (row.source_id, float(row.similarity))
-        for row in result.all()
-    ]
+    return [(row.source_id, float(row.similarity)) for row in result.all()]
 
 
 async def upsert(
@@ -142,9 +137,7 @@ class EmbeddingRepository:
     ) -> None:
         self._session_factory = session_factory
 
-    async def all_existing_texts(
-        self, model_name: str
-    ) -> set[tuple[str, str]]:
+    async def all_existing_texts(self, model_name: str) -> set[tuple[str, str]]:
         """Return all (source_id, text) pairs already embedded for *model_name*."""
         async with self._session_factory() as session:
             return await all_existing_texts(session, model_name)
