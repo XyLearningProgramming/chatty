@@ -18,13 +18,12 @@ from chatty.configs.config import (
     get_chat_config,
 )
 from chatty.configs.system import APIConfig, ChatConfig
-from chatty.core.service.deps import (
-    PgCallbackFactory,
-    get_chat_service,
-    get_pg_callback_factory,
-)
+from chatty.core.service.callback import PgCallbackFactory, get_pg_callback_factory
+from chatty.core.service.deps import get_chat_service
 from chatty.core.service.models import ChatService
+from chatty.infra.concurrency.guards import RequestGuard, get_request_guard
 from chatty.infra.concurrency.inbox import Inbox, get_inbox
+from chatty.infra.concurrency.real_ip import get_real_ip
 from chatty.infra.db import (
     ChatMessageHistoryFactory,
     get_chat_message_history_factory,
@@ -46,3 +45,5 @@ PgCallbackFactoryDep = Annotated[
 ChatMessageHistoryFactoryDep = Annotated[
     ChatMessageHistoryFactory, Depends(get_chat_message_history_factory)
 ]
+RealIPDep = Annotated[str, Depends(get_real_ip)]
+RequestGuardDep = Annotated[RequestGuard, Depends(get_request_guard)]

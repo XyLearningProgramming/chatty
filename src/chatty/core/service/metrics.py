@@ -8,11 +8,19 @@ All metrics use the ``chatty_`` prefix.
 
 import asyncio
 import functools
+import logging
 import time
 from collections.abc import AsyncGenerator, Callable
-from typing import Any, overload
+from typing import Annotated, Any, overload
 
+from fastapi import Depends, FastAPI
 from prometheus_client import Counter, Gauge, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
+
+from chatty.configs.config import AppConfig, get_app_config
+from chatty.infra.lifespan import get_app
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Chat session metrics
@@ -95,13 +103,35 @@ RAG_SOURCES_RETURNED = Histogram(
     buckets=(0, 1, 2, 3, 5, 10),
 )
 
+RAG_CACHE_LOOKUPS_TOTAL = Counter(
+    "chatty_rag_cache_lookups_total",
+    "Total RAG cache lookups by outcome",
+    ["result"],  # "hit" | "miss" | "skip"
+)
+
 # ---------------------------------------------------------------------------
 # Concurrency metrics
 # ---------------------------------------------------------------------------
 
+INBOX_OCCUPANCY = Gauge(
+    "chatty_inbox_occupancy",
+    "Current number of requests admitted into the inbox",
+)
+
 INBOX_REJECTIONS_TOTAL = Counter(
     "chatty_inbox_rejections_total",
     "Total inbox rejections (429 responses)",
+)
+
+RATE_LIMIT_REJECTIONS_TOTAL = Counter(
+    "chatty_rate_limit_rejections_total",
+    "Total rate-limit rejections (429 responses)",
+    ["scope"],  # "ip" | "global"
+)
+
+DEDUP_REJECTIONS_TOTAL = Counter(
+    "chatty_dedup_rejections_total",
+    "Total duplicate-request rejections (409 responses)",
 )
 
 SEMAPHORE_ACQUIRES_TOTAL = Counter(
@@ -114,6 +144,22 @@ SEMAPHORE_WAIT_SECONDS = Histogram(
     "chatty_semaphore_wait_seconds",
     "Time spent waiting for a semaphore slot",
     buckets=(0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30),
+)
+
+# ---------------------------------------------------------------------------
+# Model concurrency gauges
+# ---------------------------------------------------------------------------
+
+LLM_CALLS_IN_FLIGHT = Gauge(
+    "chatty_llm_calls_in_flight",
+    "Number of LLM calls currently in-flight",
+    ["model_name"],
+)
+
+EMBEDDING_CALLS_IN_FLIGHT = Gauge(
+    "chatty_embedding_calls_in_flight",
+    "Number of embedding calls currently in-flight",
+    ["model_name"],
 )
 
 
@@ -207,3 +253,26 @@ def observe_stream_response(
         return _make_wrapper(fn, service=service)
 
     return decorator
+
+
+# ---------------------------------------------------------------------------
+# Lifespan dependency
+# ---------------------------------------------------------------------------
+
+
+async def build_metrics(
+    app: Annotated[FastAPI, Depends(get_app)],
+    config: Annotated[AppConfig, Depends(get_app_config)],
+) -> AsyncGenerator[None, None]:
+    """Set up Prometheus HTTP instrumentation.
+
+    Attaches ``prometheus-fastapi-instrumentator`` middleware and the
+    ``/metrics`` endpoint to the FastAPI *app*.
+    """
+    Instrumentator(
+        should_instrument_requests_inprogress=True,
+        excluded_handlers=config.tracing.excluded_urls,
+    ).instrument(app).expose(app, endpoint="/metrics")
+
+    logger.info("Prometheus metrics initialised")
+    yield

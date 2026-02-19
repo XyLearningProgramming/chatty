@@ -33,6 +33,12 @@ class ChatRequest(BaseModel):
         description="Existing conversation ID for follow-up turns. "
         "Omit to start a new conversation.",
     )
+    nonce: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Client-generated unique ID for this request. "
+        "If provided, the server rejects duplicate nonces within 60 s.",
+    )
 
 
 def format_sse(event: StreamEvent) -> str:

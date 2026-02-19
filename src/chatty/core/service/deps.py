@@ -8,6 +8,7 @@ from typing import Annotated
 
 from fastapi import Depends
 from langchain_core.language_models import BaseLanguageModel
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chatty.configs.config import AppConfig, get_app_config
 from chatty.core.embedding.cron import get_embedder, get_embedding_repository
@@ -16,12 +17,13 @@ from chatty.core.llm import get_gated_llm
 from chatty.core.service.one_step import OneStepChatService
 from chatty.core.service.rag import RagChatService
 from chatty.infra.db.embedding import EmbeddingRepository
-from .base import BaseChatService, PgCallbackFactory
-from .callback import get_pg_callback_factory
+from chatty.infra.db.engine import get_session_factory
+
+from .callback import PgCallbackFactory, get_pg_callback_factory
 from .models import ChatService
 from .tools.registry import ToolRegistry, get_tool_registry
 
-_known_agents: dict[str, type[BaseChatService]] = {
+_known_agents: dict[str, type[ChatService]] = {
     OneStepChatService.chat_service_name: OneStepChatService,
     RagChatService.chat_service_name: RagChatService,
 }
@@ -39,6 +41,7 @@ def get_chat_service(
     pg_callback_factory: Annotated[PgCallbackFactory, Depends(get_pg_callback_factory)],
     embedder: Annotated[GatedEmbedModel, Depends(get_embedder)],
     embedding_repository: Annotated[EmbeddingRepository, Depends(get_embedding_repository)],
+    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_session_factory)],
 ) -> ChatService:
     """Create a configured chat service per request.
 
@@ -57,7 +60,7 @@ def get_chat_service(
     if agent_cls is RagChatService:
         return agent_cls(
             llm, config, embedder, embedding_repository,
-            pg_callback_factory,
+            pg_callback_factory, session_factory,
         )
 
     raise NotImplementedError(f"Agent {name} is not implemented.")

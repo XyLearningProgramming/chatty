@@ -6,8 +6,8 @@ from .engine import (build_db, get_async_session,
                      get_embedding_repository, get_session_factory)
 from .history import ChatMessageHistoryFactory, PgChatMessageHistory
 from .models import (ROLE_AI, ROLE_HUMAN, ROLE_SYSTEM, ROLE_TOOL, AIExtra,
-                     Base, ChatMessage, MessageExtra, PromptExtra, Role,
-                     SourceEmbedding, StoredToolCall, ToolExtra)
+                     Base, ChatMessage, MessageExtra, PromptExtra,
+                     Role, SourceEmbedding, StoredToolCall, ToolExtra)
 
 __all__ = [
     "build_db",

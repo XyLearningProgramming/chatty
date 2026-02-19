@@ -6,27 +6,19 @@ from pydantic import BaseModel, Field
 
 
 class QueuedEvent(BaseModel):
-    """Request was admitted into the concurrency gate inbox."""
+    """First event on every SSE stream — sent right before streaming begins.
+
+    Confirms that the request was admitted into the inbox and tells the
+    client its current position.  Inbox admission (``inbox.enter()``)
+    happens in the ``enforce_inbox`` dependency *before* the response
+    starts; this event is emitted as soon as the SSE generator runs,
+    making it the earliest signal the client can receive.
+    """
 
     type: Literal["queued"] = "queued"
     position: int = Field(description="Current inbox occupancy after admission")
     message: str = Field(
-        default="Request queued, waiting for available slot",
-        description="Human-readable status message",
-    )
-
-
-class DequeuedEvent(BaseModel):
-    """Concurrency slot acquired — agent run is starting.
-
-    Infrastructure IDs (conversation_id, trace_id) are delivered via
-    response headers (X-Chatty-Conversation, X-Chatty-Trace), not in
-    the SSE stream — following the ChatGPT convention.
-    """
-
-    type: Literal["dequeued"] = "dequeued"
-    message: str = Field(
-        default="Slot acquired, processing request",
+        default="Request admitted, starting processing",
         description="Human-readable status message",
     )
 
@@ -80,7 +72,6 @@ class ErrorEvent(BaseModel):
 
 StreamEvent = (
     QueuedEvent
-    | DequeuedEvent
     | ThinkingEvent
     | ContentEvent
     | ToolCallEvent

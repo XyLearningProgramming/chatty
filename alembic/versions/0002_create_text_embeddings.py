@@ -21,8 +21,6 @@ EMBEDDING_DIMENSIONS = 1024
 
 
 def upgrade() -> None:
-    op.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-
     op.create_table(
         "source_embeddings",
         sa.Column(
@@ -66,13 +64,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "uq_source_embeddings_source_text_model",
-        table_name="source_embeddings",
-    )
     op.execute(
         text(
             "DROP INDEX IF EXISTS ix_source_embeddings_embedding_hnsw"
         )
+    )
+    op.drop_index(
+        "uq_source_embeddings_source_text_model",
+        table_name="source_embeddings",
     )
     op.drop_table("source_embeddings")

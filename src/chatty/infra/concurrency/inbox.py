@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from chatty.configs.config import AppConfig, get_app_config
 from chatty.infra.lifespan import get_app
 from chatty.infra.redis import build_redis
+from chatty.core.service.metrics import INBOX_OCCUPANCY
 from chatty.infra.telemetry import (
     ATTR_INBOX_POSITION,
     ATTR_INBOX_REJECTED,
@@ -57,12 +58,14 @@ class Inbox:
                 span.set_attribute(ATTR_INBOX_REJECTED, True)
                 logger.info("Inbox full — rejecting request")
                 raise
+            INBOX_OCCUPANCY.inc()
             span.set_attribute(ATTR_INBOX_POSITION, position)
             logger.debug("Inbox enter: position=%d", position)
             return position
 
     async def leave(self) -> None:
         """Leave the inbox (always call, even on error)."""
+        INBOX_OCCUPANCY.dec()
         await self._backend.leave()
 
     async def aclose(self) -> None:

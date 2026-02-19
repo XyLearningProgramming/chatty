@@ -5,7 +5,6 @@
 # ---------------------------------------------------------------------------
 
 EVENT_TYPE_QUEUED = "queued"
-EVENT_TYPE_DEQUEUED = "dequeued"
 EVENT_TYPE_THINKING = "thinking"
 EVENT_TYPE_CONTENT = "content"
 EVENT_TYPE_TOOL_CALL = "tool_call"
@@ -14,7 +13,6 @@ EVENT_TYPE_ERROR = "error"
 VALID_EVENT_TYPES = frozenset(
     {
         EVENT_TYPE_QUEUED,
-        EVENT_TYPE_DEQUEUED,
         EVENT_TYPE_THINKING,
         EVENT_TYPE_CONTENT,
         EVENT_TYPE_TOOL_CALL,

@@ -3,7 +3,12 @@
 ``build_db`` is a lifespan dependency: it creates the engine +
 session factory, attaches them to ``app.state``, and disposes the
 engine on shutdown.  Per-request dependencies read from ``app.state``.
+
+Factory functions use local imports to avoid the circular dependency
+chain: telemetry → db.__init__ → embedding → telemetry.
 """
+
+from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from typing import Annotated
@@ -17,9 +22,6 @@ from sqlalchemy.ext.asyncio import (
 
 from chatty.configs.config import AppConfig, get_app_config
 from chatty.infra.lifespan import get_app
-
-from .embedding import EmbeddingRepository
-from .history import ChatMessageHistoryFactory, PgChatMessageHistory
 
 # ---------------------------------------------------------------------------
 # Lifespan dependency
@@ -73,8 +75,9 @@ def get_chat_message_history_factory(
         async_sessionmaker[AsyncSession],
         Depends(get_session_factory),
     ],
-) -> ChatMessageHistoryFactory:
+):
     """Return a factory that creates PgChatMessageHistory per conversation/trace."""
+    from .history import PgChatMessageHistory
 
     def factory(
         conversation_id: str,
@@ -93,6 +96,8 @@ def get_embedding_repository(
         async_sessionmaker[AsyncSession],
         Depends(get_session_factory),
     ],
-) -> EmbeddingRepository:
+):
     """Return the embedding repository (exists, search, upsert) for this app."""
+    from .embedding import EmbeddingRepository
+
     return EmbeddingRepository(sf)

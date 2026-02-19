@@ -37,7 +37,6 @@ from opentelemetry.trace import format_trace_id
 
 from chatty.configs.config import AppConfig, get_app_config
 from chatty.configs.system import TracingConfig
-from chatty.infra.db.engine import build_db
 from chatty.infra.lifespan import get_app
 
 logger = logging.getLogger(__name__)
@@ -52,6 +51,8 @@ tracer = trace.get_tracer("chatty")
 
 SPAN_RAG_PIPELINE = "rag.pipeline"
 SPAN_RAG_RETRIEVE = "rag.retrieve"
+SPAN_RAG_CACHE_CHECK = "rag.cache_check"
+SPAN_RAG_CACHE_WRITE = "rag.cache_write"
 SPAN_EMBEDDING_EMBED = "embedding.embed"
 SPAN_EMBEDDING_SEARCH = "embedding.search"
 SPAN_EMBEDDING_CRON_TICK = "embedding.cron_tick"
@@ -68,6 +69,7 @@ ATTR_RAG_QUERY_LEN = "rag.query_len"
 ATTR_RAG_THRESHOLD = "rag.threshold"
 ATTR_RAG_TOP_K = "rag.top_k"
 ATTR_RAG_RESULT_COUNT = "rag.result_count"
+ATTR_RAG_CACHE_HIT = "rag.cache_hit"
 
 ATTR_EMBEDDING_MODEL = "embedding.model"
 ATTR_EMBEDDING_TEXT_LEN = "embedding.text_len"
@@ -199,13 +201,16 @@ def get_current_trace_id() -> str | None:
 async def build_telemetry(
     app: Annotated[FastAPI, Depends(get_app)],
     config: Annotated[AppConfig, Depends(get_app_config)],
-    _db: Annotated[None, Depends(build_db)],
 ) -> AsyncGenerator[None, None]:
     """Initialise OTEL tracing + SQLAlchemy instrumentation.
 
-    Depends on ``build_db`` so the engine is available for SQLAlchemy
-    instrumentation.  When tracing is disabled both calls are no-ops.
+    Lazily checks ``app.state.engine`` rather than hard-depending on
+    ``build_db`` to avoid circular imports (telemetry ↔ db).
+    The lifespan declaration order in ``app.py`` guarantees ``build_db``
+    runs first.
     """
     init_telemetry(app, config.tracing)
-    instrument_sqlalchemy(app.state.engine)
+    engine = getattr(app.state, "engine", None)
+    if engine is not None:
+        instrument_sqlalchemy(engine)
     yield

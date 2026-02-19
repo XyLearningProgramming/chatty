@@ -42,7 +42,18 @@ class APIConfig(BaseModel):
 
     # Rate limiting for the main /chat endpoint.
     chat_rate_limit_per_second: int = Field(
-        default=3, description="API rate limit per minute"
+        default=2,
+        description="Max requests per second from a single IP to /chat",
+    )
+    chat_global_rate_limit: int = Field(
+        default=5,
+        description="Max requests per second to /chat across all clients. "
+        "Set to 0 to disable.",
+    )
+    dedup_window: timedelta = Field(
+        default=timedelta(seconds=5),
+        description="Duration during which identical (IP + query) pairs are "
+        "rejected as duplicates. Set to 0 to disable fingerprint dedup.",
     )
 
     request_timeout: timedelta = Field(

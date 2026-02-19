@@ -2,18 +2,17 @@
 
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from typing import Annotated
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 
 from chatty.core.service.models import (
     ChatContext,
-    DequeuedEvent,
     QueuedEvent,
     StreamEvent,
 )
-from chatty.core.service.metrics import INBOX_REJECTIONS_TOTAL
-from chatty.infra.concurrency import InboxFull
+from chatty.infra.concurrency.guards import enforce_inbox, enforce_request_guards
 from chatty.infra.id_utils import generate_id
 from chatty.infra.telemetry import get_current_trace_id
 
@@ -22,7 +21,6 @@ from .deps import (
     ChatConfigDep,
     ChatMessageHistoryFactoryDep,
     ChatServiceDep,
-    InboxDep,
 )
 from .models import ChatRequest
 from .streaming import sse_stream
@@ -55,16 +53,15 @@ async def _chat_events(
 ) -> AsyncGenerator[StreamEvent, None]:
     """Yield domain events for a single chat request.
 
-    1. ``QueuedEvent`` — client knows it is waiting.
-    2. ``DequeuedEvent`` — request admitted, agent starting.
-    3. Delegate to ``service.stream_response()``, checking for
+    1. ``QueuedEvent`` — first event on the stream, confirms inbox
+       admission with the client's position.
+    2. Delegate to ``service.stream_response()``, checking for
        client disconnect between each event.
 
     Concurrency gating on the LLM is handled transparently by
     ``GatedChatModel`` — there is no semaphore logic here.
     """
     yield QueuedEvent(position=position)
-    yield DequeuedEvent()
 
     async for event in service.stream_response(ctx):
         if await is_disconnected():
@@ -81,13 +78,14 @@ async def _chat_events(
 @router.post("/chat")
 async def chat(
     request: Request,
+    _guards: Annotated[None, Depends(enforce_request_guards)],
+    position: Annotated[int, Depends(enforce_inbox)],
     chat_request: ChatRequest,
-    chat_service: ChatServiceDep,
     api_config: APIConfigDep,
     chat_config: ChatConfigDep,
-    inbox: InboxDep,
+    chat_service: ChatServiceDep,
     chat_message_history_factory: ChatMessageHistoryFactoryDep,
-) -> StreamingResponse | JSONResponse:
+) -> StreamingResponse:
     """Process a chat request and return a streaming response.
 
     Supports two modes (ChatGPT-style):
@@ -101,7 +99,7 @@ async def chat(
     The response is a stream of Server-Sent Events, where each event
     is a JSON object with a ``type`` discriminator:
 
-    - **queued** / **dequeued** — concurrency lifecycle
+    - **queued** — inbox admission confirmation with position
     - **thinking** / **content** / **tool_call** — agent output
     - **error** — stream-level error
 
@@ -110,18 +108,9 @@ async def chat(
     - ``X-Chatty-Trace`` — trace ID for debugging
     - ``X-Chatty-Conversation`` — conversation ID for follow-up turns
 
-    Returns **429** when the inbox is full.
+    Returns **429** when rate-limited or inbox is full, **409** for
+    duplicate requests (handled by global exception handlers).
     """
-    # Admission control — reject early with a proper HTTP status code.
-    try:
-        position = await inbox.enter()
-    except InboxFull:
-        INBOX_REJECTIONS_TOTAL.inc()
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Too many requests in flight. Try again later."},
-        )
-
     # --- Resolve conversation ID ---
     conversation_id = chat_request.conversation_id or generate_id("conv")
     trace_id = get_current_trace_id() or generate_id("trace")
@@ -149,7 +138,6 @@ async def chat(
         sse_stream(
             _chat_events(ctx, chat_service, position, request.is_disconnected),
             request_timeout=api_config.request_timeout,
-            on_finish=inbox.leave,
         ),
         media_type=STREAMING_RESPONSE_MEDIA_TYPE,
         headers={

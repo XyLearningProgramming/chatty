@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
@@ -18,8 +19,12 @@ down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+EMBEDDING_DIMENSIONS = 1024
+
 
 def upgrade() -> None:
+    op.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
     op.create_table(
         "chat_messages",
         sa.Column(
@@ -42,6 +47,7 @@ def upgrade() -> None:
         ),
         sa.Column("role", sa.String(length=20), nullable=False),
         sa.Column("content", sa.String(), nullable=True),
+        sa.Column("query_embedding", sa.Text(), nullable=True),
         sa.Column("extra", postgresql.JSONB(), nullable=True),
         sa.Column(
             "created_at",
@@ -58,6 +64,15 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name="pk_chat_messages"),
         sa.UniqueConstraint("message_id", name="uq_chat_messages_message_id"),
     )
+
+    op.execute(
+        text(
+            f"ALTER TABLE chat_messages "
+            f"ALTER COLUMN query_embedding TYPE vector({EMBEDDING_DIMENSIONS}) "
+            f"USING query_embedding::text::float[]::vector"
+        )
+    )
+
     op.create_index(
         "ix_chat_messages_conversation_id_created_at",
         "chat_messages",
@@ -74,8 +89,22 @@ def upgrade() -> None:
         ["created_at"],
     )
 
+    op.execute(
+        text(
+            "CREATE INDEX ix_chat_messages_query_embedding_hnsw "
+            "ON chat_messages "
+            "USING hnsw (query_embedding vector_cosine_ops) "
+            "WHERE role = 'human' AND query_embedding IS NOT NULL"
+        )
+    )
+
 
 def downgrade() -> None:
+    op.execute(
+        text(
+            "DROP INDEX IF EXISTS ix_chat_messages_query_embedding_hnsw"
+        )
+    )
     op.drop_index(
         "ix_chat_messages_created_at", table_name="chat_messages"
     )

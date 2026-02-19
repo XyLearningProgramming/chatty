@@ -22,6 +22,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
 from pydantic import ConfigDict, Field
 
+from chatty.core.service.metrics import LLM_CALLS_IN_FLIGHT
 from chatty.infra.concurrency.semaphore import ModelSemaphore
 
 logger = logging.getLogger(__name__)
@@ -77,10 +78,14 @@ class GatedChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         async with self.semaphore.slot():
-            logger.debug("LLM generate: acquired semaphore slot")
-            return await self.inner._agenerate(
-                messages, stop, run_manager, **kwargs
-            )
+            model = getattr(self.inner, "model_name", "unknown")
+            LLM_CALLS_IN_FLIGHT.labels(model_name=model).inc()
+            try:
+                return await self.inner._agenerate(
+                    messages, stop, run_manager, **kwargs
+                )
+            finally:
+                LLM_CALLS_IN_FLIGHT.labels(model_name=model).dec()
 
     async def _astream(
         self,
@@ -90,11 +95,15 @@ class GatedChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         async with self.semaphore.slot():
-            logger.debug("LLM stream: acquired semaphore slot")
-            async for chunk in self.inner._astream(
-                messages, stop, run_manager, **kwargs
-            ):
-                yield chunk
+            model = getattr(self.inner, "model_name", "unknown")
+            LLM_CALLS_IN_FLIGHT.labels(model_name=model).inc()
+            try:
+                async for chunk in self.inner._astream(
+                    messages, stop, run_manager, **kwargs
+                ):
+                    yield chunk
+            finally:
+                LLM_CALLS_IN_FLIGHT.labels(model_name=model).dec()
 
     # ------------------------------------------------------------------
     # Tool binding — delegate formatting to inner, re-bind to self

@@ -36,9 +36,6 @@ class ResponseFormatter:
             position = event.get("position", "?")
             self._print(f"⏳ Queued (position: {position})")
 
-        elif event_type == "dequeued":
-            self._print("🔄 Processing...")
-
         elif event_type == "thinking":
             if self.show_thinking:
                 content = event.get("content", "")

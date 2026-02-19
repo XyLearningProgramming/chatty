@@ -9,7 +9,6 @@ import logging
 from typing import Annotated
 
 from fastapi import Depends, FastAPI
-from prometheus_fastapi_instrumentator import Instrumentator
 from starlette.middleware.cors import CORSMiddleware
 
 from chatty.api.chat import router as chat_router
@@ -17,6 +16,8 @@ from chatty.api.exceptions import build_exception_handlers
 from chatty.api.health import router as health_router
 from chatty.configs.config import get_app_config
 from chatty.core.embedding.cron import build_cron
+from chatty.core.service.metrics import build_metrics
+from chatty.infra.concurrency.guards import build_request_guard
 from chatty.infra.concurrency.inbox import build_inbox
 from chatty.infra.concurrency.semaphore import build_semaphore
 from chatty.infra.db.engine import build_db
@@ -32,8 +33,10 @@ async def lifespan(
     _db: Annotated[None, Depends(build_db)],
     _telemetry: Annotated[None, Depends(build_telemetry)],
     _inbox: Annotated[None, Depends(build_inbox)],
+    _guard: Annotated[None, Depends(build_request_guard)],
     _semaphore: Annotated[None, Depends(build_semaphore)],
     _cron: Annotated[None, Depends(build_cron)],
+    _metrics: Annotated[None, Depends(build_metrics)],
     _exc: Annotated[None, Depends(build_exception_handlers)],
 ):
     """Application lifespan — deps injected & cleaned up automatically."""
@@ -74,11 +77,6 @@ def get_app() -> FastAPI:
     app.include_router(chat_router, prefix=api_prefix)
     app.include_router(health_router)
 
-    Instrumentator().instrument(app).expose(
-        app, endpoint="/metrics"
-    )
-
     return app
-
 
 app = get_app()

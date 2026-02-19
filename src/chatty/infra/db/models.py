@@ -108,6 +108,53 @@ MessageExtra = PromptExtra | AIExtra | ToolExtra
 
 
 # ---------------------------------------------------------------------------
+# pgvector support
+# ---------------------------------------------------------------------------
+
+EMBEDDING_DIMENSIONS = 1024
+
+
+class Vector(TypeDecorator):
+    """SQLAlchemy type for pgvector vector column.
+
+    Stores and retrieves vectors as lists of floats. The underlying
+    database type is ``vector(dimensions)`` from the pgvector extension.
+    """
+
+    impl = String
+    cache_ok = True
+
+    def __init__(self, dimensions: int = EMBEDDING_DIMENSIONS):
+        super().__init__()
+        self.dimensions = dimensions
+
+    def load_dialect_impl(self, dialect):
+        return dialect.type_descriptor(String)
+
+    def process_bind_param(self, value, dialect):
+        """Convert list[float] to PostgreSQL vector string format."""
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return "{" + ",".join(str(float(x)) for x in value) + "}"
+        return value
+
+    def process_result_value(self, value, dialect):
+        """Convert PostgreSQL vector to list[float].
+
+        asyncpg returns vector types as lists directly, but we handle
+        both list and string formats for safety.
+        """
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            return [float(x.strip()) for x in value.strip("[]").split(",")]
+        return value
+
+
+# ---------------------------------------------------------------------------
 # Chat messages table
 # ---------------------------------------------------------------------------
 
@@ -120,12 +167,9 @@ class ChatMessage(Base):
     ``trace_id`` and are ordered by ``created_at``.  Messages from the
     same multi-turn conversation share a ``conversation_id``.
 
-    All IDs use a ``{prefix}_{random}`` format (e.g. ``conv_xxx``,
-    ``trace_xxx``, ``msg_xxx``).  Provider-generated IDs such as
-    OpenAI ``chatcmpl-xxx`` and ``call_xxx`` are used as-is.
-
-    Role-specific fields (tool_calls, tool_name, model_name, run_id,
-    etc.) live in the ``extra`` JSONB column.
+    The ``query_embedding`` column is populated only on first-turn human
+    messages to enable semantic response caching.  A partial HNSW index
+    covers ``role = 'human' AND query_embedding IS NOT NULL``.
     """
 
     __tablename__ = "chat_messages"
@@ -138,12 +182,12 @@ class ChatMessage(Base):
     conversation_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=False,  # composite index below
+        index=False,
     )
     trace_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=False,  # composite index below
+        index=False,
     )
     message_id: Mapped[str] = mapped_column(
         String,
@@ -156,6 +200,10 @@ class ChatMessage(Base):
     )
     content: Mapped[str | None] = mapped_column(
         String,
+        nullable=True,
+    )
+    query_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(EMBEDDING_DIMENSIONS),
         nullable=True,
     )
     extra: Mapped[dict | None] = mapped_column(
@@ -196,60 +244,7 @@ class ChatMessage(Base):
 
 
 # ---------------------------------------------------------------------------
-# pgvector support
-# ---------------------------------------------------------------------------
-
-# Default embedding dimensions (Qwen3-0.6B hidden_size)
-EMBEDDING_DIMENSIONS = 1024
-
-
-class Vector(TypeDecorator):
-    """SQLAlchemy type for pgvector vector column.
-
-    Stores and retrieves vectors as lists of floats. The underlying
-    database type is ``vector(dimensions)`` from the pgvector extension.
-    """
-
-    impl = String
-    cache_ok = True
-
-    def __init__(self, dimensions: int = EMBEDDING_DIMENSIONS):
-        super().__init__()
-        self.dimensions = dimensions
-
-    def load_dialect_impl(self, dialect):
-        # Return a type that will be handled as text in SQLAlchemy
-        # but we'll use raw SQL for actual vector operations
-        return dialect.type_descriptor(String)
-
-    def process_bind_param(self, value, dialect):
-        """Convert list[float] to PostgreSQL vector string format."""
-        if value is None:
-            return None
-        if isinstance(value, list):
-            # Format as PostgreSQL array literal: '{0.1,0.2,...}'
-            # This format works for casting to vector type
-            return "{" + ",".join(str(float(x)) for x in value) + "}"
-        return value
-
-    def process_result_value(self, value, dialect):
-        """Convert PostgreSQL vector to list[float].
-
-        asyncpg returns vector types as lists directly, but we handle
-        both list and string formats for safety.
-        """
-        if value is None:
-            return None
-        if isinstance(value, list):
-            return value
-        if isinstance(value, str):
-            # Parse string format '[0.1,0.2,...]'
-            return [float(x.strip()) for x in value.strip("[]").split(",")]
-        return value
-
-
-# ---------------------------------------------------------------------------
-# Text embeddings table (embedding cache)
+# Text embeddings table (RAG match hints)
 # ---------------------------------------------------------------------------
 
 

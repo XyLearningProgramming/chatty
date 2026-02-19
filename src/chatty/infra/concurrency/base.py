@@ -21,6 +21,18 @@ class AcquireTimeout(Exception):
 class ClientDisconnected(Exception):
     """Raised when the client disconnects while waiting for a slot."""
 
+
+class RateLimited(Exception):
+    """Raised when a request exceeds the rate limit (per-IP or global)."""
+
+    def __init__(self, message: str, *, scope: str = "ip") -> None:
+        super().__init__(message)
+        self.scope = scope
+
+
+class DuplicateRequest(Exception):
+    """Raised when a duplicate request is detected (nonce or fingerprint)."""
+
 # ---------------------------------------------------------------------------
 # Abstract backends
 # ---------------------------------------------------------------------------

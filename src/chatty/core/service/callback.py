@@ -1,5 +1,8 @@
 """PG callback factory — narrow capability for message recording."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import Depends
@@ -8,7 +11,7 @@ from chatty.infra.db import (ChatMessageHistoryFactory,
                              get_chat_message_history_factory)
 from chatty.infra.db.callback import PGMessageCallback
 
-from .base import PgCallbackFactory
+PgCallbackFactory = Callable[[str, str, str | None], PGMessageCallback]
 
 
 def get_pg_callback_factory(
