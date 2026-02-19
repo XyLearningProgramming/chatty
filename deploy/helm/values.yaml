@@ -83,9 +83,17 @@ autoscaling:
 # Content is injected at deploy time via: --set-file "configMapData.config\.yaml=configs/config.yaml"
 configMapData: {}
 
-volumes: {}
+# Volumes and volumeMounts rendered via tpl so template expressions work.
+volumes:
+  - name: configmap-yaml
+    configMap:
+      name: '{{ include "chatty.fullname" . }}-config'
 
-volumeMounts: {}
+volumeMounts:
+  - name: configmap-yaml
+    mountPath: /app/configs/config.yaml
+    subPath: config.yaml
+    readOnly: true
 
 nodeSelector: {}
 
@@ -94,6 +102,23 @@ tolerations: []
 affinity: {}
 
 secretName: helmfile-secret-chatty
+
+# Init containers rendered via tpl, so Go template expressions work.
+# Uses the same image/secret/configMap as the main container by default.
+# To skip migrations, set initContainers: []
+initContainers:
+  - name: migrate
+    image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+    imagePullPolicy: "{{ .Values.image.pullPolicy }}"
+    command: ["alembic", "upgrade", "head"]
+    envFrom:
+      - secretRef:
+          name: "{{ .Values.secretName }}"
+    volumeMounts:
+      - name: configmap-yaml
+        mountPath: /app/configs/config.yaml
+        subPath: config.yaml
+        readOnly: true
 
 metrics:
   podMonitor:

@@ -1,15 +1,20 @@
 """RAG chat service -- LangGraph StateGraph with semantic caching.
 
 Pipeline nodes:
-    embed_query  → cache_check ─┬─ (hit)  → return_cached → END
+    embed_query  → cache_check ─┬─ (hit)  → record_cached → END
                                 └─ (miss) → retrieve_topk → build_prompt
-                                           → generate → cache_write → END
+                                           → generate → END
 
 First-turn queries (no conversation history) are eligible for semantic
 caching.  The cache is backed by the ``query_embedding`` column on
 ``chat_messages``: a similar past human message is found and its
 corresponding AI response is returned.  TTL is checked at read time
 against ``created_at`` using ``CacheConfig.ttl``.
+
+Embedding is piped through the normal callback write path via
+``query_to_human_message`` (no separate UPDATE needed).  Cache hits
+are recorded as regular human + AI message pairs with
+``extra.cache_hit = true``.
 """
 
 from __future__ import annotations
@@ -23,32 +28,32 @@ from langchain_core.language_models import BaseLanguageModel
 from langchain_core.messages import (
     AIMessageChunk,
     BaseMessage,
-    HumanMessage,
     SystemMessage,
 )
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chatty.configs.config import AppConfig
 from chatty.core.embedding.gated import GatedEmbedModel
-from chatty.infra.db.cache import search_cached_response, stamp_query_embedding
+from chatty.infra.db.cache import CacheRepository
+from chatty.infra.db.callback import PGMessageCallback
+from chatty.infra.db.converters import (
+    cached_response_to_ai_message,
+    query_to_human_message,
+)
 from chatty.infra.db.embedding import EmbeddingRepository
+from chatty.infra.db.history import ChatMessageHistoryFactory
 from chatty.infra.http_utils import HttpClient
 from chatty.infra.telemetry import (
-    ATTR_RAG_CACHE_HIT,
     ATTR_RAG_QUERY_LEN,
     ATTR_RAG_RESULT_COUNT,
     ATTR_RAG_THRESHOLD,
     ATTR_RAG_TOP_K,
-    SPAN_RAG_CACHE_CHECK,
-    SPAN_RAG_CACHE_WRITE,
     SPAN_RAG_PIPELINE,
     SPAN_RAG_RETRIEVE,
     tracer,
 )
 
-from .callback import PgCallbackFactory
 from .metrics import (
     RAG_CACHE_LOOKUPS_TOTAL,
     RAG_RETRIEVAL_LATENCY_SECONDS,
@@ -65,11 +70,10 @@ logger = logging.getLogger(__name__)
 
 NODE_EMBED_QUERY = "embed_query"
 NODE_CACHE_CHECK = "cache_check"
-NODE_RETURN_CACHED = "return_cached"
+NODE_RECORD_CACHED = "record_cached"
 NODE_RETRIEVE_TOPK = "retrieve_topk"
 NODE_BUILD_PROMPT = "build_prompt"
 NODE_GENERATE = "generate"
-NODE_CACHE_WRITE = "cache_write"
 
 ROUTE_HIT = "hit"
 ROUTE_MISS = "miss"
@@ -135,15 +139,15 @@ class RagChatService(ChatService):
         config: AppConfig,
         embedder: GatedEmbedModel,
         embedding_repository: EmbeddingRepository,
-        pg_callback_factory: PgCallbackFactory,
-        session_factory: async_sessionmaker[AsyncSession],
+        history_factory: ChatMessageHistoryFactory,
+        cache_repository: CacheRepository,
     ) -> None:
         self._llm = llm
         self._config = config
         self._embedder = embedder
         self._embedding_repository = embedding_repository
-        self._pg_callback_factory = pg_callback_factory
-        self._session_factory = session_factory
+        self._history_factory = history_factory
+        self._cache_repository = cache_repository
         self._rag_config = config.rag
         self._cache_config = config.cache
         self._system_prompt = config.prompt.render_system_prompt(config.persona)
@@ -160,24 +164,22 @@ class RagChatService(ChatService):
 
         builder.add_node(NODE_EMBED_QUERY, self._embed_query_node)
         builder.add_node(NODE_CACHE_CHECK, self._cache_check_node)
-        builder.add_node(NODE_RETURN_CACHED, self._return_cached_node)
+        builder.add_node(NODE_RECORD_CACHED, self._record_cached_node)
         builder.add_node(NODE_RETRIEVE_TOPK, self._retrieve_topk_node)
         builder.add_node(NODE_BUILD_PROMPT, self._build_prompt_node)
         builder.add_node(NODE_GENERATE, self._generate_node)
-        builder.add_node(NODE_CACHE_WRITE, self._cache_write_node)
 
         builder.add_edge(START, NODE_EMBED_QUERY)
         builder.add_edge(NODE_EMBED_QUERY, NODE_CACHE_CHECK)
         builder.add_conditional_edges(
             NODE_CACHE_CHECK,
             self._route_after_cache,
-            {ROUTE_HIT: NODE_RETURN_CACHED, ROUTE_MISS: NODE_RETRIEVE_TOPK},
+            {ROUTE_HIT: NODE_RECORD_CACHED, ROUTE_MISS: NODE_RETRIEVE_TOPK},
         )
-        builder.add_edge(NODE_RETURN_CACHED, END)
+        builder.add_edge(NODE_RECORD_CACHED, END)
         builder.add_edge(NODE_RETRIEVE_TOPK, NODE_BUILD_PROMPT)
         builder.add_edge(NODE_BUILD_PROMPT, NODE_GENERATE)
-        builder.add_edge(NODE_GENERATE, NODE_CACHE_WRITE)
-        builder.add_edge(NODE_CACHE_WRITE, END)
+        builder.add_edge(NODE_GENERATE, END)
 
         return builder.compile()
 
@@ -204,33 +206,46 @@ class RagChatService(ChatService):
     # ------------------------------------------------------------------
 
     async def _cache_check_node(self, state: RagState) -> dict:
-        with tracer.start_as_current_span(SPAN_RAG_CACHE_CHECK) as span:
-            if not self._cache_config.enabled or not state.get(KEY_IS_FIRST_TURN):
-                span.set_attribute(ATTR_RAG_CACHE_HIT, False)
-                RAG_CACHE_LOOKUPS_TOTAL.labels(result=CACHE_RESULT_SKIP).inc()
-                return {KEY_CACHE_HIT: None}
+        if not self._cache_config.enabled or not state.get(KEY_IS_FIRST_TURN):
+            RAG_CACHE_LOOKUPS_TOTAL.labels(result=CACHE_RESULT_SKIP).inc()
+            return {KEY_CACHE_HIT: None}
 
-            async with self._session_factory() as session:
-                cached = await search_cached_response(
-                    session,
-                    query_embedding=state[KEY_QUERY_EMBEDDING],
-                    similarity_threshold=self._cache_config.similarity_threshold,
-                    ttl=self._cache_config.ttl,
-                )
+        cached = await self._cache_repository.search(
+            query_embedding=state[KEY_QUERY_EMBEDDING],
+            similarity_threshold=self._cache_config.similarity_threshold,
+            ttl=self._cache_config.ttl,
+        )
 
-            is_hit = cached is not None
-            span.set_attribute(ATTR_RAG_CACHE_HIT, is_hit)
-            RAG_CACHE_LOOKUPS_TOTAL.labels(
-                result=CACHE_RESULT_HIT if is_hit else CACHE_RESULT_MISS
-            ).inc()
-            return {KEY_CACHE_HIT: cached}
+        is_hit = cached is not None
+        RAG_CACHE_LOOKUPS_TOTAL.labels(
+            result=CACHE_RESULT_HIT if is_hit else CACHE_RESULT_MISS
+        ).inc()
+        return {KEY_CACHE_HIT: cached}
 
     # ------------------------------------------------------------------
-    # Node: return_cached  (pass-through; content delivered via updates)
+    # Node: record_cached  (persist query + cached response to DB)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    async def _return_cached_node(state: RagState) -> dict:
+    async def _record_cached_node(self, state: RagState) -> dict:
+        """Record the cached query/response pair in chat_messages.
+
+        Uses the converter pairs so the human message carries the
+        embedding and the AI message is marked ``cache_hit = true``.
+        """
+        human = query_to_human_message(
+            state[KEY_QUERY],
+            embedding=state.get(KEY_QUERY_EMBEDDING),
+        )
+        ai = cached_response_to_ai_message(
+            state[KEY_CACHE_HIT],
+            model_name=self._config.llm.model_name,
+        )
+        try:
+            await self._current_history.aadd_messages([human, ai])
+        except Exception:
+            logger.warning(
+                "Failed to record cached messages", exc_info=True
+            )
         return {}
 
     # ------------------------------------------------------------------
@@ -266,7 +281,7 @@ class RagChatService(ChatService):
                         extra_processors=decl.get_processors() if decl else None,
                     )
                 except Exception:
-                    logger.warning(
+                    logger.error(
                         "Failed to resolve content for source '%s'",
                         source_id,
                         exc_info=True,
@@ -309,34 +324,20 @@ class RagChatService(ChatService):
     async def _generate_node(
         self, state: RagState, config: RunnableConfig
     ) -> dict:
+        embed = (
+            state.get(KEY_QUERY_EMBEDDING)
+            if state.get(KEY_IS_FIRST_TURN) and self._cache_config.enabled
+            else None
+        )
+        human = query_to_human_message(state[KEY_QUERY], embedding=embed)
+
         messages: list[BaseMessage] = [
             SystemMessage(content=state[KEY_ENRICHED_PROMPT]),
             *state.get(KEY_HISTORY, []),
-            HumanMessage(content=state[KEY_QUERY]),
+            human,
         ]
         response = await self._llm.ainvoke(messages, config=config)
         return {KEY_RESPONSE_TEXT: response.content or ""}
-
-    # ------------------------------------------------------------------
-    # Node: cache_write  (stamp embedding on the human message row)
-    # ------------------------------------------------------------------
-
-    async def _cache_write_node(self, state: RagState) -> dict:
-        if not state.get(KEY_IS_FIRST_TURN) or not self._cache_config.enabled:
-            return {}
-
-        with tracer.start_as_current_span(SPAN_RAG_CACHE_WRITE):
-            try:
-                async with self._session_factory() as session:
-                    await stamp_query_embedding(
-                        session,
-                        conversation_id=state[KEY_CONVERSATION_ID],
-                        query_embedding=state[KEY_QUERY_EMBEDDING],
-                    )
-            except Exception:
-                logger.warning("Failed to stamp query embedding", exc_info=True)
-
-        return {}
 
     # ------------------------------------------------------------------
     # Streaming
@@ -347,28 +348,31 @@ class RagChatService(ChatService):
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream domain events, wrapping with metrics."""
         decorated = observe_stream_response(self.chat_service_name)(
-            self._stream
+            self._stream_response
         )
         async for event in decorated(ctx):
             yield event
 
-    async def _stream(
+    async def _stream_response(
         self, ctx: ChatContext
     ) -> AsyncGenerator[StreamEvent, None]:
         """Execute the RAG graph and yield domain events.
 
         Uses dual ``stream_mode=["messages", "updates"]``:
         - ``"messages"`` delivers LLM token chunks from the generate node.
-        - ``"updates"`` delivers the cache_check result so cached
+        - ``"updates"`` delivers the record_cached result so cached
           responses can be emitted without an LLM call.
         """
         with tracer.start_as_current_span(SPAN_RAG_PIPELINE) as span:
             span.set_attribute(ATTR_RAG_QUERY_LEN, len(ctx.query))
 
-            pg_callback = self._pg_callback_factory(
-                ctx.conversation_id,
-                ctx.trace_id,
-                getattr(self._llm, "model_name", None),
+            history = self._history_factory(
+                ctx.conversation_id, trace_id=ctx.trace_id,
+            )
+            self._current_history = history
+            pg_callback = PGMessageCallback(
+                history=history,
+                model_name=self._config.llm.model_name,
             )
 
             graph_input: RagState = {

@@ -4,6 +4,10 @@ Covers three directions:
 - DB row  → BaseMessage   (history read)
 - BaseMessage → DB row    (history write)
 - LangChain event → BaseMessage  (callback hooks)
+
+Cache-aware pairs:
+- query_to_human_message / human_message_to_chat_message  (embedding)
+- cached_response_to_ai_message  (cache_hit marker)
 """
 
 from typing import Any
@@ -22,8 +26,10 @@ from chatty.infra.id_utils import generate_id
 
 from .constants import (
     DEFAULT_TOOL_NAME,
+    EXTRA_CACHE_HIT,
     EXTRA_MODEL_NAME,
     EXTRA_PARENT_RUN_ID,
+    EXTRA_QUERY_EMBEDDING,
     EXTRA_RUN_ID,
     EXTRA_TOOL_CALL_ID,
     EXTRA_TOOL_CALLS,
@@ -36,7 +42,9 @@ from .constants import (
 from .models import ChatMessage, StoredToolCall
 
 _VALID_ROLES = (ROLE_SYSTEM, ROLE_HUMAN, ROLE_AI, ROLE_TOOL)
-_EXTRA_PASSTHROUGH_KEYS = (EXTRA_RUN_ID, EXTRA_PARENT_RUN_ID, EXTRA_MODEL_NAME)
+_EXTRA_PASSTHROUGH_KEYS = (
+    EXTRA_RUN_ID, EXTRA_PARENT_RUN_ID, EXTRA_MODEL_NAME, EXTRA_CACHE_HIT,
+)
 
 
 # ------------------------------------------------------------------
@@ -125,7 +133,13 @@ def message_to_chat_message(
     conversation_id: str,
     trace_id: str,
 ) -> ChatMessage:
-    """Build a ChatMessage ORM instance from a BaseMessage and scope."""
+    """Build a ChatMessage ORM instance from a BaseMessage and scope.
+
+    Dispatches to ``human_message_to_chat_message`` for HumanMessage
+    so that ``query_embedding`` is extracted automatically.
+    """
+    if isinstance(msg, HumanMessage):
+        return human_message_to_chat_message(msg, conversation_id, trace_id)
     message_id, role, content, extra = message_to_row(msg)
     return ChatMessage(
         conversation_id=conversation_id,
@@ -134,6 +148,70 @@ def message_to_chat_message(
         role=role,
         content=content,
         extra=extra,
+    )
+
+
+# ------------------------------------------------------------------
+# Cache-aware converter pairs
+# ------------------------------------------------------------------
+
+
+def query_to_human_message(
+    query: str,
+    *,
+    embedding: list[float] | None = None,
+) -> HumanMessage:
+    """Build a HumanMessage from a user query, optionally carrying an embedding.
+
+    The embedding is stashed in ``additional_kwargs`` and extracted by
+    ``human_message_to_chat_message`` when persisting to the DB.
+    """
+    kwargs: dict[str, Any] = {}
+    if embedding is not None:
+        kwargs[EXTRA_QUERY_EMBEDDING] = embedding
+    return HumanMessage(
+        content=query,
+        id=generate_id("msg"),
+        additional_kwargs=kwargs,
+    )
+
+
+def human_message_to_chat_message(
+    msg: HumanMessage,
+    conversation_id: str,
+    trace_id: str,
+) -> ChatMessage:
+    """Convert a HumanMessage to ChatMessage, extracting embedding if present."""
+    embedding = (msg.additional_kwargs or {}).get(EXTRA_QUERY_EMBEDDING)
+    message_id, role, content, extra = message_to_row(msg)
+    return ChatMessage(
+        conversation_id=conversation_id,
+        trace_id=trace_id,
+        message_id=message_id,
+        role=role,
+        content=content,
+        query_embedding=embedding,
+        extra=extra,
+    )
+
+
+def cached_response_to_ai_message(
+    content: str,
+    *,
+    model_name: str | None = None,
+) -> AIMessage:
+    """Build an AIMessage for a cached response, marked with ``cache_hit``.
+
+    The ``cache_hit`` flag flows into the ``extra`` JSONB column via
+    ``_EXTRA_PASSTHROUGH_KEYS`` when the message is persisted.
+    """
+    kwargs: dict[str, Any] = {EXTRA_CACHE_HIT: True}
+    if model_name:
+        kwargs[EXTRA_MODEL_NAME] = model_name
+    return AIMessage(
+        content=content,
+        id=generate_id("msg"),
+        additional_kwargs=kwargs,
     )
 
 
@@ -162,18 +240,23 @@ def prompt_messages_from_event(
     run_id: UUID,
     parent_run_id: UUID | None,
 ) -> list[BaseMessage]:
-    """Extract system/human messages and tag with run info."""
+    """Extract system/human messages and tag with run info.
+
+    Preserves original ``additional_kwargs`` (e.g. ``query_embedding``)
+    and merges in run lineage.
+    """
     extra_kw = run_extra(run_id, parent_run_id)
     out: list[BaseMessage] = []
     for msg in messages:
         if not isinstance(msg, BaseMessage):
             continue
+        merged = {**(msg.additional_kwargs or {}), **extra_kw}
         if msg.type == ROLE_SYSTEM:
             out.append(
                 SystemMessage(
                     content=msg.content or "",
                     id=msg.id or generate_id("msg"),
-                    additional_kwargs=extra_kw,
+                    additional_kwargs=merged,
                 )
             )
         elif msg.type == ROLE_HUMAN:
@@ -181,7 +264,7 @@ def prompt_messages_from_event(
                 HumanMessage(
                     content=msg.content or "",
                     id=msg.id or generate_id("msg"),
-                    additional_kwargs=extra_kw,
+                    additional_kwargs=merged,
                 )
             )
     return out

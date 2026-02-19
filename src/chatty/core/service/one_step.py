@@ -67,7 +67,7 @@ class OneStepChatService(ChatService):
         pg_callback = self._pg_callback_factory(
             ctx.conversation_id,
             ctx.trace_id,
-            getattr(self._llm, "model_name", None),
+            self._config.llm.model_name,
         )
 
         graph = create_agent(

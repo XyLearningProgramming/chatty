@@ -31,6 +31,8 @@ __all__ = [
     "EXTRA_TOOL_CALL_ID",
     "EXTRA_TOOL_CALLS",
     "EXTRA_TOOL_NAME",
+    "EXTRA_CACHE_HIT",
+    "EXTRA_QUERY_EMBEDDING",
     # table / columns
     "TABLE_CHAT_MESSAGES",
     "COL_CONVERSATION_ID",
@@ -64,6 +66,9 @@ COL_CREATED_AT = "created_at"
 PARAM_CID = "cid"
 PARAM_SYSTEM_ROLE = "system_role"
 PARAM_LIM = "lim"
+
+EXTRA_CACHE_HIT = "cache_hit"
+EXTRA_QUERY_EMBEDDING = "query_embedding"
 
 # Defaults
 DEFAULT_MAX_MESSAGES = 100

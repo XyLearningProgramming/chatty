@@ -20,7 +20,7 @@ from chatty.core.service.metrics import build_metrics
 from chatty.infra.concurrency.guards import build_request_guard
 from chatty.infra.concurrency.inbox import build_inbox
 from chatty.infra.concurrency.semaphore import build_semaphore
-from chatty.infra.db.engine import build_db
+from chatty.infra.db_engine import build_db
 from chatty.infra.lifespan import inject
 from chatty.infra.telemetry import build_telemetry
 

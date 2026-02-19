@@ -28,7 +28,7 @@ from chatty.infra.db import (
     ChatMessageHistoryFactory,
     get_chat_message_history_factory,
 )
-from chatty.infra.db.engine import get_async_session, get_session_factory
+from chatty.infra.db_engine import get_async_session, get_session_factory
 
 AppConfigDep = Annotated[AppConfig, Depends(get_app_config)]
 APIConfigDep = Annotated[APIConfig, Depends(get_api_config)]

@@ -33,6 +33,11 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- $secret := lookup "v1" "Secret" .Release.Namespace .Values.secretName }}
+      {{- if .Values.initContainers }}
+      initContainers:
+        {{- tpl (toYaml .Values.initContainers) . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           {{- with .Values.securityContext }}
@@ -41,8 +46,6 @@ spec:
           {{- end }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{/* Inject env vars from the Kubernetes secret */}}
-          {{- $secret := lookup "v1" "Secret" .Release.Namespace .Values.secretName }}
           {{- if $secret }}
           envFrom:
             - secretRef:
@@ -64,28 +67,13 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.configMapData .Values.volumeMounts }}
+          {{- if .Values.volumeMounts }}
           volumeMounts:
-          {{- if .Values.configMapData }}
-            - name: configmap-yaml
-              mountPath: /app/configs/config.yaml
-              subPath: config.yaml
-              readOnly: true
+            {{- tpl (toYaml .Values.volumeMounts) . | nindent 12 }}
           {{- end }}
-          {{- with .Values.volumeMounts }}
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- end }}
-      {{- if or .Values.configMapData .Values.volumes }}
+      {{- if .Values.volumes }}
       volumes:
-      {{- if .Values.configMapData }}
-        - name: configmap-yaml
-          configMap:
-            name: {{ include "chatty.fullname" . }}-config
-      {{- end }}
-      {{- with .Values.volumes }}
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- tpl (toYaml .Values.volumes) . | nindent 8 }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

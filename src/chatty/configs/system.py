@@ -78,7 +78,7 @@ class CacheConfig(BaseModel):
         default=3, description="Queries needed before caching answer"
     )
     ttl: timedelta = Field(
-        default=timedelta(hours=24),
+        default=timedelta(hours=72),
         description="TTL for dynamic memory entries",
     )
 

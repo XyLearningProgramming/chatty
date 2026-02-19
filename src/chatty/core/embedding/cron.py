@@ -28,7 +28,7 @@ from chatty.core.service.metrics import (
 from chatty.infra.concurrency.base import AcquireTimeout
 from chatty.infra.concurrency.semaphore import build_semaphore
 from chatty.infra.db.embedding import EmbeddingRepository
-from chatty.infra.db.engine import build_db
+from chatty.infra.db_engine import build_db
 from chatty.infra.lifespan import get_app
 from chatty.infra.telemetry import (
     ATTR_CRON_EMBEDDED,

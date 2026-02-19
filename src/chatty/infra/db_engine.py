@@ -1,11 +1,17 @@
-"""Async SQLAlchemy engine and session factory.
+"""Async SQLAlchemy engine and session factory — **leaf module**.
 
 ``build_db`` is a lifespan dependency: it creates the engine +
 session factory, attaches them to ``app.state``, and disposes the
 engine on shutdown.  Per-request dependencies read from ``app.state``.
 
-Factory functions use local imports to avoid the circular dependency
-chain: telemetry → db.__init__ → embedding → telemetry.
+This module lives *outside* the ``db`` package on purpose so that
+``telemetry`` can ``Depends(build_db)`` without triggering
+``db/__init__`` (which re-exports repositories that import
+``telemetry`` — a circular dependency).
+
+The higher-level factories (``get_chat_message_history_factory``,
+``get_embedding_repository``, ``get_cache_repository``) stay in
+``db.engine`` because they need intra-package imports.
 """
 
 from __future__ import annotations
@@ -68,36 +74,3 @@ async def get_async_session(
     factory: async_sessionmaker[AsyncSession] = request.app.state.session_factory
     async with factory() as session:
         yield session
-
-
-def get_chat_message_history_factory(
-    sf: Annotated[
-        async_sessionmaker[AsyncSession],
-        Depends(get_session_factory),
-    ],
-):
-    """Return a factory that creates PgChatMessageHistory per conversation/trace."""
-    from .history import PgChatMessageHistory
-
-    def factory(
-        conversation_id: str,
-        trace_id: str | None = None,
-        max_messages: int | None = None,
-    ) -> PgChatMessageHistory:
-        return PgChatMessageHistory(
-            sf, conversation_id, trace_id=trace_id, max_messages=max_messages
-        )
-
-    return factory
-
-
-def get_embedding_repository(
-    sf: Annotated[
-        async_sessionmaker[AsyncSession],
-        Depends(get_session_factory),
-    ],
-):
-    """Return the embedding repository (exists, search, upsert) for this app."""
-    from .embedding import EmbeddingRepository
-
-    return EmbeddingRepository(sf)

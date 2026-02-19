@@ -38,7 +38,7 @@ cache:
   max_size: 30
   similarity_threshold: 0.95
   admission_count: 3
-  ttl: "P1D"
+  ttl: "P3D"
 
 # --- Chat ---
 chat:
