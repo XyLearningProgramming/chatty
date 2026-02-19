@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
 
@@ -30,24 +31,16 @@ def upgrade() -> None:
         sa.Column(
             "id", sa.BigInteger(), autoincrement=True, nullable=False
         ),
-        sa.Column(
-            "conversation_id",
-            sa.String(),
-            nullable=False,
-        ),
-        sa.Column(
-            "trace_id",
-            sa.String(),
-            nullable=False,
-        ),
-        sa.Column(
-            "message_id",
-            sa.String(),
-            nullable=False,
-        ),
-        sa.Column("role", sa.String(length=20), nullable=False),
+        sa.Column("conversation_id", sa.String(), nullable=False),
+        sa.Column("trace_id", sa.String(), nullable=False),
+        sa.Column("message_id", sa.String(), nullable=False),
+        sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("content", sa.String(), nullable=True),
-        sa.Column("query_embedding", sa.Text(), nullable=True),
+        sa.Column(
+            "query_embedding",
+            Vector(EMBEDDING_DIMENSIONS),
+            nullable=True,
+        ),
         sa.Column("extra", postgresql.JSONB(), nullable=True),
         sa.Column(
             "created_at",
@@ -65,14 +58,6 @@ def upgrade() -> None:
         sa.UniqueConstraint("message_id", name="uq_chat_messages_message_id"),
     )
 
-    op.execute(
-        text(
-            f"ALTER TABLE chat_messages "
-            f"ALTER COLUMN query_embedding TYPE vector({EMBEDDING_DIMENSIONS}) "
-            f"USING query_embedding::text::float[]::vector"
-        )
-    )
-
     op.create_index(
         "ix_chat_messages_conversation_id_created_at",
         "chat_messages",
@@ -88,7 +73,6 @@ def upgrade() -> None:
         "chat_messages",
         ["created_at"],
     )
-
     op.execute(
         text(
             "CREATE INDEX ix_chat_messages_query_embedding_hnsw "

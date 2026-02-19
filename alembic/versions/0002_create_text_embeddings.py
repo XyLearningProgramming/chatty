@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import text
 
 revision: str = "0002"
@@ -28,7 +29,11 @@ def upgrade() -> None:
         ),
         sa.Column("source_id", sa.String(), nullable=False),
         sa.Column("text", sa.String(), nullable=False),
-        sa.Column("embedding", sa.Text(), nullable=False),
+        sa.Column(
+            "embedding",
+            Vector(EMBEDDING_DIMENSIONS),
+            nullable=False,
+        ),
         sa.Column("model_name", sa.String(), nullable=False),
         sa.Column(
             "created_at",
@@ -37,14 +42,6 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name="pk_source_embeddings"),
-    )
-
-    op.execute(
-        text(
-            f"ALTER TABLE source_embeddings "
-            f"ALTER COLUMN embedding TYPE vector({EMBEDDING_DIMENSIONS}) "
-            f"USING embedding::text::float[]::vector"
-        )
     )
 
     op.create_index(

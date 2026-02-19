@@ -73,7 +73,7 @@ async def search_cached_response(
     or ``None`` on cache miss.
     """
     query_vec_str = (
-        "{" + ",".join(str(float(x)) for x in query_embedding) + "}"
+        "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
     )
     ttl_interval = f"{int(ttl.total_seconds())} seconds"
 
@@ -102,7 +102,7 @@ async def stamp_query_embedding(
     in the given conversation (for future cache lookups).
     """
     embedding_str = (
-        "{" + ",".join(str(float(x)) for x in query_embedding) + "}"
+        "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
     )
     await session.execute(
         text(SQL_STAMP_EMBEDDING),

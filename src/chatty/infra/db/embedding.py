@@ -84,7 +84,7 @@ async def search(
     Returns (source_id, similarity) tuples sorted by similarity, highest first.
     """
     query_vec_str = (
-        "{" + ",".join(str(float(x)) for x in query_embedding) + "}"
+        "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
     )
     result = await session.execute(
         text(SQL_SEARCH),

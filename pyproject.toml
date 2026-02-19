@@ -26,6 +26,7 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.41b0",
     "numpy>=1.26",
     "openai>=1.0",
+    "pgvector>=0.4.2",
 ]
 
 [tool.ruff.lint]

@@ -7,7 +7,8 @@ auto-generated migrations.
 
 from typing import Any, Literal
 
-from sqlalchemy import BigInteger, DateTime, Index, String, TypeDecorator, func
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import BigInteger, DateTime, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from typing_extensions import NotRequired, TypedDict
@@ -107,51 +108,7 @@ class ToolExtra(_ExtraBase):
 MessageExtra = PromptExtra | AIExtra | ToolExtra
 
 
-# ---------------------------------------------------------------------------
-# pgvector support
-# ---------------------------------------------------------------------------
-
 EMBEDDING_DIMENSIONS = 1024
-
-
-class Vector(TypeDecorator):
-    """SQLAlchemy type for pgvector vector column.
-
-    Stores and retrieves vectors as lists of floats. The underlying
-    database type is ``vector(dimensions)`` from the pgvector extension.
-    """
-
-    impl = String
-    cache_ok = True
-
-    def __init__(self, dimensions: int = EMBEDDING_DIMENSIONS):
-        super().__init__()
-        self.dimensions = dimensions
-
-    def load_dialect_impl(self, dialect):
-        return dialect.type_descriptor(String)
-
-    def process_bind_param(self, value, dialect):
-        """Convert list[float] to PostgreSQL vector string format."""
-        if value is None:
-            return None
-        if isinstance(value, list):
-            return "{" + ",".join(str(float(x)) for x in value) + "}"
-        return value
-
-    def process_result_value(self, value, dialect):
-        """Convert PostgreSQL vector to list[float].
-
-        asyncpg returns vector types as lists directly, but we handle
-        both list and string formats for safety.
-        """
-        if value is None:
-            return None
-        if isinstance(value, list):
-            return value
-        if isinstance(value, str):
-            return [float(x.strip()) for x in value.strip("[]").split(",")]
-        return value
 
 
 # ---------------------------------------------------------------------------

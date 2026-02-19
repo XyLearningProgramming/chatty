@@ -59,6 +59,38 @@ from .models import ChatContext, ChatService, ContentEvent, StreamEvent
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Node / edge / stream-mode constants  (avoid magic strings)
+# ---------------------------------------------------------------------------
+
+NODE_EMBED_QUERY = "embed_query"
+NODE_CACHE_CHECK = "cache_check"
+NODE_RETURN_CACHED = "return_cached"
+NODE_RETRIEVE_TOPK = "retrieve_topk"
+NODE_BUILD_PROMPT = "build_prompt"
+NODE_GENERATE = "generate"
+NODE_CACHE_WRITE = "cache_write"
+
+ROUTE_HIT = "hit"
+ROUTE_MISS = "miss"
+
+CACHE_RESULT_SKIP = "skip"
+CACHE_RESULT_HIT = "hit"
+CACHE_RESULT_MISS = "miss"
+
+STREAM_MODE_MESSAGES = "messages"
+STREAM_MODE_UPDATES = "updates"
+
+# State field keys
+KEY_QUERY = "query"
+KEY_HISTORY = "history"
+KEY_CONVERSATION_ID = "conversation_id"
+KEY_QUERY_EMBEDDING = "query_embedding"
+KEY_IS_FIRST_TURN = "is_first_turn"
+KEY_CACHE_HIT = "cache_hit"
+KEY_TOP_RESULTS = "top_results"
+KEY_ENRICHED_PROMPT = "enriched_prompt"
+KEY_RESPONSE_TEXT = "response_text"
 
 # ---------------------------------------------------------------------------
 # Graph state
@@ -126,26 +158,26 @@ class RagChatService(ChatService):
     def _build_graph(self):
         builder: StateGraph = StateGraph(RagState)
 
-        builder.add_node("embed_query", self._embed_query_node)
-        builder.add_node("cache_check", self._cache_check_node)
-        builder.add_node("return_cached", self._return_cached_node)
-        builder.add_node("retrieve_topk", self._retrieve_topk_node)
-        builder.add_node("build_prompt", self._build_prompt_node)
-        builder.add_node("generate", self._generate_node)
-        builder.add_node("cache_write", self._cache_write_node)
+        builder.add_node(NODE_EMBED_QUERY, self._embed_query_node)
+        builder.add_node(NODE_CACHE_CHECK, self._cache_check_node)
+        builder.add_node(NODE_RETURN_CACHED, self._return_cached_node)
+        builder.add_node(NODE_RETRIEVE_TOPK, self._retrieve_topk_node)
+        builder.add_node(NODE_BUILD_PROMPT, self._build_prompt_node)
+        builder.add_node(NODE_GENERATE, self._generate_node)
+        builder.add_node(NODE_CACHE_WRITE, self._cache_write_node)
 
-        builder.add_edge(START, "embed_query")
-        builder.add_edge("embed_query", "cache_check")
+        builder.add_edge(START, NODE_EMBED_QUERY)
+        builder.add_edge(NODE_EMBED_QUERY, NODE_CACHE_CHECK)
         builder.add_conditional_edges(
-            "cache_check",
+            NODE_CACHE_CHECK,
             self._route_after_cache,
-            {"hit": "return_cached", "miss": "retrieve_topk"},
+            {ROUTE_HIT: NODE_RETURN_CACHED, ROUTE_MISS: NODE_RETRIEVE_TOPK},
         )
-        builder.add_edge("return_cached", END)
-        builder.add_edge("retrieve_topk", "build_prompt")
-        builder.add_edge("build_prompt", "generate")
-        builder.add_edge("generate", "cache_write")
-        builder.add_edge("cache_write", END)
+        builder.add_edge(NODE_RETURN_CACHED, END)
+        builder.add_edge(NODE_RETRIEVE_TOPK, NODE_BUILD_PROMPT)
+        builder.add_edge(NODE_BUILD_PROMPT, NODE_GENERATE)
+        builder.add_edge(NODE_GENERATE, NODE_CACHE_WRITE)
+        builder.add_edge(NODE_CACHE_WRITE, END)
 
         return builder.compile()
 
@@ -155,17 +187,16 @@ class RagChatService(ChatService):
 
     @staticmethod
     def _route_after_cache(state: RagState) -> str:
-        return "hit" if state.get("cache_hit") else "miss"
+        return ROUTE_HIT if state.get(KEY_CACHE_HIT) else ROUTE_MISS
 
     # ------------------------------------------------------------------
     # Node: embed_query
     # ------------------------------------------------------------------
 
     async def _embed_query_node(self, state: RagState) -> dict:
-        query_emb = await self._embedder.embed(state["query"])
+        query_emb = await self._embedder.embed(state[KEY_QUERY])
         return {
-            "query_embedding": query_emb,
-            "is_first_turn": len(state.get("history") or []) == 0,
+            KEY_QUERY_EMBEDDING: query_emb,
         }
 
     # ------------------------------------------------------------------
@@ -174,15 +205,15 @@ class RagChatService(ChatService):
 
     async def _cache_check_node(self, state: RagState) -> dict:
         with tracer.start_as_current_span(SPAN_RAG_CACHE_CHECK) as span:
-            if not self._cache_config.enabled or not state.get("is_first_turn"):
+            if not self._cache_config.enabled or not state.get(KEY_IS_FIRST_TURN):
                 span.set_attribute(ATTR_RAG_CACHE_HIT, False)
-                RAG_CACHE_LOOKUPS_TOTAL.labels(result="skip").inc()
-                return {"cache_hit": None}
+                RAG_CACHE_LOOKUPS_TOTAL.labels(result=CACHE_RESULT_SKIP).inc()
+                return {KEY_CACHE_HIT: None}
 
             async with self._session_factory() as session:
                 cached = await search_cached_response(
                     session,
-                    query_embedding=state["query_embedding"],
+                    query_embedding=state[KEY_QUERY_EMBEDDING],
                     similarity_threshold=self._cache_config.similarity_threshold,
                     ttl=self._cache_config.ttl,
                 )
@@ -190,9 +221,9 @@ class RagChatService(ChatService):
             is_hit = cached is not None
             span.set_attribute(ATTR_RAG_CACHE_HIT, is_hit)
             RAG_CACHE_LOOKUPS_TOTAL.labels(
-                result="hit" if is_hit else "miss"
+                result=CACHE_RESULT_HIT if is_hit else CACHE_RESULT_MISS
             ).inc()
-            return {"cache_hit": cached}
+            return {KEY_CACHE_HIT: cached}
 
     # ------------------------------------------------------------------
     # Node: return_cached  (pass-through; content delivered via updates)
@@ -213,7 +244,7 @@ class RagChatService(ChatService):
 
             start = time.monotonic()
             results = await self._embedding_repository.search(
-                state["query_embedding"],
+                state[KEY_QUERY_EMBEDDING],
                 self._embedder.model_name,
                 self._rag_config.similarity_threshold,
                 self._rag_config.top_k,
@@ -252,7 +283,7 @@ class RagChatService(ChatService):
                 len(top_results),
                 self._rag_config.similarity_threshold,
             )
-            return {"top_results": top_results}
+            return {KEY_TOP_RESULTS: top_results}
 
     # ------------------------------------------------------------------
     # Node: build_prompt
@@ -260,7 +291,7 @@ class RagChatService(ChatService):
 
     def _build_prompt_node(self, state: RagState) -> dict:
         context_parts: list[str] = []
-        for source_id, content, sim in state.get("top_results", []):
+        for source_id, content, sim in state.get(KEY_TOP_RESULTS, []):
             context_parts.append(
                 f"### {source_id} (relevance: {sim:.2f})\n{content}"
             )
@@ -269,7 +300,7 @@ class RagChatService(ChatService):
             base=self._system_prompt,
             content="\n\n".join(context_parts),
         )
-        return {"enriched_prompt": enriched}
+        return {KEY_ENRICHED_PROMPT: enriched}
 
     # ------------------------------------------------------------------
     # Node: generate  (LLM call — tokens streamed via stream_mode)
@@ -279,19 +310,19 @@ class RagChatService(ChatService):
         self, state: RagState, config: RunnableConfig
     ) -> dict:
         messages: list[BaseMessage] = [
-            SystemMessage(content=state["enriched_prompt"]),
-            *state.get("history", []),
-            HumanMessage(content=state["query"]),
+            SystemMessage(content=state[KEY_ENRICHED_PROMPT]),
+            *state.get(KEY_HISTORY, []),
+            HumanMessage(content=state[KEY_QUERY]),
         ]
         response = await self._llm.ainvoke(messages, config=config)
-        return {"response_text": response.content or ""}
+        return {KEY_RESPONSE_TEXT: response.content or ""}
 
     # ------------------------------------------------------------------
     # Node: cache_write  (stamp embedding on the human message row)
     # ------------------------------------------------------------------
 
     async def _cache_write_node(self, state: RagState) -> dict:
-        if not state.get("is_first_turn") or not self._cache_config.enabled:
+        if not state.get(KEY_IS_FIRST_TURN) or not self._cache_config.enabled:
             return {}
 
         with tracer.start_as_current_span(SPAN_RAG_CACHE_WRITE):
@@ -299,8 +330,8 @@ class RagChatService(ChatService):
                 async with self._session_factory() as session:
                     await stamp_query_embedding(
                         session,
-                        conversation_id=state["conversation_id"],
-                        query_embedding=state["query_embedding"],
+                        conversation_id=state[KEY_CONVERSATION_ID],
+                        query_embedding=state[KEY_QUERY_EMBEDDING],
                     )
             except Exception:
                 logger.warning("Failed to stamp query embedding", exc_info=True)
@@ -341,26 +372,27 @@ class RagChatService(ChatService):
             )
 
             graph_input: RagState = {
-                "query": ctx.query,
-                "history": list(ctx.history),
-                "conversation_id": ctx.conversation_id,
+                KEY_QUERY: ctx.query,
+                KEY_HISTORY: list(ctx.history),
+                KEY_CONVERSATION_ID: ctx.conversation_id,
+                KEY_IS_FIRST_TURN: not ctx.history,
             }
 
             async for mode, data in self._graph.astream(
                 graph_input,
-                stream_mode=["messages", "updates"],
+                stream_mode=[STREAM_MODE_MESSAGES, STREAM_MODE_UPDATES],
                 config={"callbacks": [pg_callback]},
             ):
-                if mode == "messages":
+                if mode == STREAM_MODE_MESSAGES:
                     chunk, _metadata = data
                     if isinstance(chunk, AIMessageChunk) and chunk.content:
                         yield ContentEvent(content=chunk.content)
 
-                elif mode == "updates":
+                elif mode == STREAM_MODE_UPDATES:
                     if not isinstance(data, dict):
                         continue
-                    cache_update = data.get("cache_check")
-                    if cache_update and cache_update.get("cache_hit"):
+                    cache_update = data.get(NODE_CACHE_CHECK)
+                    if cache_update and cache_update.get(KEY_CACHE_HIT):
                         yield ContentEvent(
-                            content=cache_update["cache_hit"]
+                            content=cache_update[KEY_CACHE_HIT]
                         )
