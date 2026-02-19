@@ -69,7 +69,6 @@ DEFAULT_ENCODING = "utf-8"
 # Application config (re-created on every call — not a singleton)
 # ---------------------------------------------------------------------------
 
-
 class AppConfig(BaseSettings):
     """Application configuration."""
 

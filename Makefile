@@ -1,6 +1,10 @@
 
 .PHONY: help install test test-unit test-e2e test-golden lint format typecheck check dev db-upgrade clean
 
+# Project root (directory containing this Makefile). Ensures .env is loaded from repo root
+# even when make is invoked from a subdirectory.
+ROOT := $(dir $(realpath $(firstword $(MAKEFILE_LIST))))
+
 # Default target
 help:
 	@echo "Available targets:"
@@ -47,11 +51,11 @@ check: lint typecheck
 
 # Development
 dev:
-	uv run --env-file .env uvicorn chatty.app:app --host 0.0.0.0 --port 8080 --reload
+	uv run --env-file $(ROOT).env uvicorn chatty.app:app --host 0.0.0.0 --port 8080 --reload
 
 # Database
 db-upgrade:
-	uv run --env-file .env alembic upgrade head
+	uv run --env-file $(ROOT).env alembic upgrade head
 
 # Cleanup
 clean:

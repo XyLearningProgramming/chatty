@@ -207,7 +207,6 @@ class LoggingConfig(BaseModel):
     )
     json_output: bool = Field(
         default=True,
-        alias="json",
         description="Emit JSON lines (prod). "
         "Set to false for human-readable dev output.",
     )
