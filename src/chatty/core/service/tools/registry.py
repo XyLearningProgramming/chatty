@@ -1,15 +1,14 @@
 """Tool registry for LangGraph agents.
 
 Tools are built from ``persona.tools`` declarations.  Each declaration
-references sources by id.  The registry delegates to the matching
-``ToolBuilder`` which handles processor resolution internally.
+references sources by id.
 """
 
 import asyncio
 import functools
 import logging
 from datetime import timedelta
-from typing import Annotated, Type
+from typing import Annotated
 
 from fastapi import Depends
 from langchain_core.tools import BaseTool
@@ -21,7 +20,6 @@ from chatty.configs.persona import (
 )
 from chatty.configs.system import PromptConfig
 
-from .model import ToolBuilder
 from .url_tool import URLDispatcherTool
 
 logger = logging.getLogger(__name__)
@@ -44,10 +42,6 @@ def _apply_timeout(tool: BaseTool, timeout: timedelta) -> BaseTool:
 class ToolRegistry:
     """Registry that builds tools from persona tool declarations."""
 
-    _known_tools: dict[str, Type[ToolBuilder]] = {
-        cls.tool_type: cls for cls in [URLDispatcherTool]
-    }
-
     def __init__(
         self,
         tools: list[ToolDeclaration],
@@ -65,23 +59,16 @@ class ToolRegistry:
 
     # ------------------------------------------------------------------
 
+    @staticmethod
     def _build_tools(
-        self,
         declarations: list[ToolDeclaration],
         sources: dict[str, KnowledgeSource],
         prompt: PromptConfig,
     ) -> list[BaseTool]:
-        tools: list[BaseTool] = []
-        for decl in declarations:
-            builder = self._known_tools.get(decl.type)
-            if not builder:
-                raise NotImplementedError(
-                    f"Tool type '{decl.type}' is not supported."
-                )
-            tools.append(
-                builder.from_declaration(decl, sources, prompt)
-            )
-        return tools
+        return [
+            URLDispatcherTool.from_declaration(decl, sources, prompt)
+            for decl in declarations
+        ]
 
 
 # ---------------------------------------------------------------------------

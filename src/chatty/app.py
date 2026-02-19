@@ -36,7 +36,6 @@ async def lifespan(
     _guard: Annotated[None, Depends(build_request_guard)],
     _semaphore: Annotated[None, Depends(build_semaphore)],
     _cron: Annotated[None, Depends(build_cron)],
-    _metrics: Annotated[None, Depends(build_metrics)],
     _exc: Annotated[None, Depends(build_exception_handlers)],
 ):
     """Application lifespan — deps injected & cleaned up automatically."""
@@ -74,6 +73,8 @@ def get_app() -> FastAPI:
     )
 
     api_prefix = _build_api_prefix(config.api.route_prefix)
+    build_metrics(app, config)
+
     app.include_router(chat_router, prefix=api_prefix)
     app.include_router(health_router)
 

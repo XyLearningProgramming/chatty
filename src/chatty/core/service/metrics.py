@@ -11,14 +11,13 @@ import functools
 import logging
 import time
 from collections.abc import AsyncGenerator, Callable
-from typing import Annotated, Any, overload
+from typing import Any, overload
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from prometheus_client import Counter, Gauge, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from chatty.configs.config import AppConfig, get_app_config
-from chatty.infra.lifespan import get_app
+from chatty.configs.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -256,18 +255,15 @@ def observe_stream_response(
 
 
 # ---------------------------------------------------------------------------
-# Lifespan dependency
+# HTTP instrumentation (must run before app starts)
 # ---------------------------------------------------------------------------
 
 
-async def build_metrics(
-    app: Annotated[FastAPI, Depends(get_app)],
-    config: Annotated[AppConfig, Depends(get_app_config)],
-) -> AsyncGenerator[None, None]:
-    """Set up Prometheus HTTP instrumentation.
+def build_metrics(app: FastAPI, config: AppConfig) -> None:
+    """Attach Prometheus HTTP middleware and ``/metrics`` endpoint.
 
-    Attaches ``prometheus-fastapi-instrumentator`` middleware and the
-    ``/metrics`` endpoint to the FastAPI *app*.
+    Called at app-construction time (inside ``get_app``) because
+    Starlette forbids adding middleware after the ASGI app has started.
     """
     Instrumentator(
         should_instrument_requests_inprogress=True,
@@ -275,4 +271,3 @@ async def build_metrics(
     ).instrument(app).expose(app, endpoint="/metrics")
 
     logger.info("Prometheus metrics initialised")
-    yield

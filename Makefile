@@ -1,5 +1,5 @@
 
-.PHONY: help install test test-unit test-e2e test-golden lint format typecheck check dev clean
+.PHONY: help install test test-unit test-e2e test-golden lint format typecheck check dev db-upgrade clean
 
 # Default target
 help:
@@ -14,6 +14,7 @@ help:
 	@echo "  typecheck   - Run type checking"
 	@echo "  check       - Run all code quality checks (lint + typecheck)"
 	@echo "  dev         - Start development server with reload"
+	@echo "  db-upgrade  - Run Alembic migrations to head"
 	@echo "  clean       - Clean up generated files"
 
 # Installation
@@ -47,6 +48,10 @@ check: lint typecheck
 # Development
 dev:
 	uv run uvicorn chatty.app:app --host 0.0.0.0 --port 8080 --reload
+
+# Database
+db-upgrade:
+	uv run --env-file .env alembic upgrade head
 
 # Cleanup
 clean:

@@ -25,7 +25,6 @@ from chatty.infra.telemetry import (
 
 logger = logging.getLogger(__name__)
 
-_TOOL_TYPE = "url_dispatcher"
 _SCHEMA_NAME = "LookupInput"
 
 
@@ -37,8 +36,6 @@ class URLDispatcherTool(BaseTool):
     source maps to a ``KnowledgeSource`` that handles fetching and
     processing via ``get_content()``.
     """
-
-    tool_type: str = _TOOL_TYPE
 
     sources: dict[str, KnowledgeSource] = Field(default_factory=dict)
     action_processors: list[Any] = Field(default_factory=list)

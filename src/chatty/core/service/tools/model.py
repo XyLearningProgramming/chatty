@@ -14,15 +14,9 @@ if TYPE_CHECKING:
 class ToolBuilder(Protocol):
     """Protocol for tool builders that create tools from config.
 
-    Each concrete builder handles one ``tool_type`` (e.g. ``'url_dispatcher'``).
     The registry calls ``from_declaration`` once per tool entry to
     produce a single dispatcher tool that the model sees.
     """
-
-    @property
-    def tool_type(self) -> str:
-        """Return the tool type this builder handles."""
-        return ""
 
     @classmethod
     @abstractmethod

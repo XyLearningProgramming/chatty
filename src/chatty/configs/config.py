@@ -18,6 +18,7 @@ from typing import Any
 
 import yaml
 from pydantic import Field
+from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -170,8 +171,10 @@ class _PromptYamlSettingsSource(PydanticBaseSettingsSource):
     of propagating as opaque dicts.
     """
 
-    def __init__(self, settings_cls: type[BaseSettings]) -> None:
-        self.settings_cls = settings_cls
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[Any, str, bool]:
+        return None, field_name, False
 
     def __call__(self) -> dict[str, Any]:
         if not PROMPT_CONFIG_FILE.exists():
