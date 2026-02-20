@@ -10,7 +10,3 @@ metadata:
   annotations:
     replicator.v1.mittwald.de/replicate-from: cert-manager/{{ .Values.DOMAIN }}-tls
 type: {{ .Values.tlsCertificate.type }}
-data:
-  tls.key: ""
-  tls.crt: ""
-  ca.crt: ""
