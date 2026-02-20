@@ -1,0 +1,127 @@
+# Default values for chatty.
+# This is a YAML-formatted file.
+
+replicaCount: 1
+
+DOMAIN: x3huang.dev
+
+tlsCertificate:
+  type: kubernetes.io/tls
+
+image:
+  repository: ""   # required -- set via --set or CI
+  tag: ""          # required -- set via --set or CI
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+
+securityContext: {}
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    kubernetes.io/ingress.class: traefik
+  path: /api/v1/chatty
+  pathType: Prefix
+
+# Tight resource limits for 1G/1CPU VPS
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 10m
+    memory: 32Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 15
+  timeoutSeconds: 2
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  timeoutSeconds: 2
+  periodSeconds: 5
+  failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 99
+
+# YAML config mounted as a ConfigMap at /app/configs/config.yaml (subPath).
+# Replaces the baked-in config file; pod restart required for changes.
+# Secret values (LLM keys, DB URIs) should NOT go here -- use k8s secrets.
+# Content is injected at deploy time via: --set-file "configMapData.config\.yaml=configs/config.yaml"
+configMapData: {}
+
+# Volumes and volumeMounts rendered via tpl so template expressions work.
+volumes:
+  - name: configmap-yaml
+    configMap:
+      name: '{{ include "chatty.fullname" . }}-config'
+
+volumeMounts:
+  - name: configmap-yaml
+    mountPath: /app/configs/config.yaml
+    subPath: config.yaml
+    readOnly: true
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+secretName: helmfile-secret-chatty
+
+# Init containers rendered via tpl, so Go template expressions work.
+# Uses the same image/secret/configMap as the main container by default.
+# To skip migrations, set initContainers: []
+initContainers:
+  - name: migrate
+    image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+    imagePullPolicy: "{{ .Values.image.pullPolicy }}"
+    command: ["alembic", "upgrade", "head"]
+    envFrom:
+      - secretRef:
+          name: "{{ .Values.secretName }}"
+    volumeMounts:
+      - name: configmap-yaml
+        mountPath: /app/configs/config.yaml
+        subPath: config.yaml
+        readOnly: true
+
+metrics:
+  podMonitor:
+    enabled: false
+    path: /metrics
+    interval: 67s

@@ -1,0 +1,17 @@
+{{- if .Values.metrics.podMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "chatty.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chatty.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "chatty.selectorLabels" . | nindent 6 }}
+  podMetricsEndpoints:
+    - port: http
+      path: {{ .Values.metrics.podMonitor.path }}
+      interval: {{ .Values.metrics.podMonitor.interval }}
+{{- end }}

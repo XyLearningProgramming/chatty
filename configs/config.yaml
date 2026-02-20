@@ -1,0 +1,172 @@
+# Chatty application configuration (single merged config).
+#
+# This file is baked into the Docker image at /app/configs/config.yaml.
+# In Kubernetes a ConfigMap (built from this file) is mounted over the
+# same path via subPath, replacing the baked-in copy.
+#
+# Secret values should be injected via environment variables / k8s secrets:
+#   CHATTY_LLM__ENDPOINT            – LLM server URL
+#   CHATTY_LLM__API_KEY             – LLM API key
+#   CHATTY_THIRD_PARTY__POSTGRES_URI – PostgreSQL connection URI
+#   CHATTY_THIRD_PARTY__REDIS_URI    – Redis connection URI
+
+# --- LLM (non-secret tunables) ---
+llm:
+  # endpoint: "http://localhost:8000/api/v1/"  # inject via CHATTY_LLM__ENDPOINT
+  # api_key: ""                                # inject via CHATTY_LLM__API_KEY
+  model_name: "gpt-3.5-turbo"
+  max_tokens: 512
+  context_window: 2048
+  temperature: 0.1
+  top_p: 0.9
+  model_timeout: "PT5M"
+  max_retries: 3
+
+# --- Third-party (all secrets – inject via env) ---
+# third_party:
+#   postgres_uri: "postgresql+asyncpg://app:devsecret@localhost:5432/app"
+#   redis_uri: "redis://:devsecret@localhost:6383/0"
+
+# --- API ---
+api:
+  route_prefix: chatty
+  chat_rate_limit_per_second: 3
+  request_timeout: "PT5M"
+
+# --- Cache ---
+cache:
+  enabled: true
+  max_size: 30
+  similarity_threshold: 0.95
+  admission_count: 3
+  ttl: "P3D"
+
+# --- Chat ---
+chat:
+  agent_name: one_step
+  max_conversation_length: 3
+  tool_timeout: "PT1M"
+  rag_no_think_enabled: true
+  rag_no_think_max_chars: 15
+
+# --- Embedding (non-secret tunables) ---
+embedding:
+  # endpoint: "http://localhost:8000/api/v1/"  # inject via CHATTY_EMBEDDING__ENDPOINT
+  # api_key: ""                                # inject via CHATTY_EMBEDDING__API_KEY
+  model_name: "Qwen3-0.6B"
+  dimensions: 1024
+  max_input_tokens: 512
+
+# --- RAG ---
+rag:
+  top_k: 3
+  similarity_threshold: 0.7
+  cron_interval: 30
+
+# --- Logging ---
+logging:
+  level: INFO
+  json_output: true         # false for human-readable dev output
+
+# --- Tracing (secrets via env: CHATTY_TRACING__ENDPOINT, etc.) ---
+tracing:
+  enabled: false
+  service_name: chatty
+  sample_rate: 0.1
+  excluded_urls:
+    - /metrics
+    - /health
+
+# --- Concurrency gate ---
+concurrency:
+  max_concurrency: 1
+  inbox_max_size: 10
+
+# --- Persona ---
+# Three layers: sources (content), tools (agent actions), embed (RAG).
+persona:
+  name: Xinyu Huang
+  character:
+    - chatty
+    - professional
+    - love to share
+  expertise:
+    - python, golang, cpp
+    - llm agent dev
+    - web dev
+    - devops & k8s
+
+  # Layer 1: Content acquisition
+  sources:
+    current_homepage:
+      description: >
+        Personal website meta info: title, author, icons, description.
+      content_url: "https://x3huang.dev"
+      timeout: "PT30S"
+      cache_ttl: "P1D"
+      processors:
+        - html_head_title_meta
+
+    resume:
+      description: >
+        Full resume / CV with professional background, skills,
+        and experience.
+      content_url: "https://x3huang.dev/resume/20250703.pdf"
+      timeout: "PT30S"
+      cache_ttl: "PT6H"
+      processors:
+        - name: truncate
+          max_length: 1500
+
+    blog_posts:
+      description: >
+        Index of all blog posts with titles, links, and short
+        descriptions (from llms.txt).
+      content_url: "https://x3huang.dev/llms.txt"
+      timeout: "PT30S"
+      cache_ttl: "P1D"
+      processors:
+        - name: truncate
+          max_length: 1500
+
+  # Layer 2: Tool actions (exposed to OneStep agent)
+  tools:
+    - name: lookup
+      type: url_dispatcher
+      sources: [current_homepage, resume, blog_posts]
+      processors:
+        - name: truncate
+          max_length: 1500
+      description: >
+        Look up external information that you don't already know.
+        Call when the user asks about something that requires
+        live data (e.g. website content, resume details).
+
+  # Layer 3: Embed actions (RAG similarity search)
+  embed:
+    - source: current_homepage
+      match_hints:
+        - "personal website"
+        - "homepage and online presence"
+      processors:
+        - name: truncate
+          max_length: 1000
+
+    - source: resume
+      match_hints:
+        - "work experience and career history"
+        - "programming languages and technical skills"
+        - "education and qualifications"
+      processors:
+        - name: truncate
+          max_length: 1500
+
+    - source: blog_posts
+      match_hints:
+        - "blog posts and articles"
+        - "kubernetes and self-hosting"
+        - "CI/CD and DevOps pipelines"
+        - "Unity game development"
+      processors:
+        - name: truncate
+          max_length: 1500

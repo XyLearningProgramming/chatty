@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "tasks": [],
+  "configurations": [
+    {
+      "name": "FastAPI Dev (uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "chatty.app:app", // adjust to your actual module
+        "--reload",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+        "--workers",
+        "1",
+      ],
+      "jinja": true,
+      "justMyCode": false,
+      "console": "integratedTerminal"
+    }
+  ]
+}

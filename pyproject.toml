@@ -1,0 +1,65 @@
+[project]
+name = "chatty"
+version = "0.1.0"
+description = "Chatbot impersonates me (or you) professionally with context."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.13.4",
+    "fastapi>=0.116.1",
+    "httpx[socks]>=0.28.1",
+    "jinja2>=3.1.0",
+    "langchain>=1.2.9",
+    "langchain-core>=0.3.49",
+    "langchain-openai>=0.3.28",
+    "langgraph>=0.4.1",
+    "prometheus-fastapi-instrumentator>=7.1.0",
+    "pydantic-settings>=2.10.1",
+    "redis>=5.0.0",
+    "pymupdf>=1.25.3",
+    "uvicorn>=0.35.0",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp>=1.20",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
+    "opentelemetry-instrumentation-httpx>=0.41b0",
+    "python-json-logger>=3.2,<4",
+    "numpy>=1.26",
+    "openai>=1.0",
+    "pgvector>=0.4.2",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
+    "alembic>=1.15",
+]
+
+[tool.ruff.lint]
+select = ["C", "E", "F", "I", "W"]
+
+[tool.ruff]
+line-length = 88
+extend-exclude = ["cli", "tests"]
+
+[tool.coverage.run]
+source = ["src/chatty"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
+    "pyyaml>=6.0.2",
+    "ruff>=0.12.5",
+]
