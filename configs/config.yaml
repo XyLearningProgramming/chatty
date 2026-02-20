@@ -43,7 +43,7 @@ cache:
 
 # --- Chat ---
 chat:
-  agent_name: rag
+  agent_name: one_step
   max_conversation_length: 3
   tool_timeout: "PT1M"
   rag_no_think_enabled: true
@@ -111,7 +111,7 @@ persona:
       description: >
         Full resume / CV with professional background, skills,
         and experience.
-      content_url: "https://x3huang.dev/resume"
+      content_url: "https://x3huang.dev/resume/20250703.pdf"
       timeout: "PT30S"
       cache_ttl: "PT6H"
       processors:

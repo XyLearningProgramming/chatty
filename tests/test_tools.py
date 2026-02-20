@@ -57,7 +57,7 @@ class TestKnowledgeSource:
         )
         assert source.content_url == "https://example.com"
         assert source.content == ""
-        assert source.timeout == 30
+        assert source.timeout == timedelta(seconds=30)
         assert source.processors == []
 
     def test_content_source(self):
@@ -245,8 +245,15 @@ class TestURLDispatcherFromDeclaration:
         tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
         assert tool.sources["resume"].timeout == timedelta(seconds=5)
 
-    def test_tool_type_attribute(self):
-        assert URLDispatcherTool.tool_type == "url_dispatcher"
+    def test_from_declaration_returns_correct_type(self):
+        sources = self._make_sources()
+        decl = ToolDeclaration(
+            name="lookup",
+            type="url_dispatcher",
+            sources=["homepage"],
+        )
+        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        assert isinstance(tool, URLDispatcherTool)
 
     def test_action_processors_from_declaration(self):
         sources = self._make_sources()
@@ -555,19 +562,24 @@ class TestToolRegistry:
         registry = self._make_registry({}, [])
         assert registry.get_tools() == []
 
-    def test_unknown_tool_type_raises(self):
+    def test_all_declarations_become_url_dispatcher(self):
         sources = {
-            "s": KnowledgeSource(content_url="http://x"),
+            "s": KnowledgeSource(
+                description="d",
+                content_url="http://x",
+            ),
         }
         tools = [
             ToolDeclaration(
                 name="t",
-                type="unknown_type",
+                type="url_dispatcher",
                 sources=["s"],
             ),
         ]
-        with pytest.raises(NotImplementedError, match="unknown_type"):
-            self._make_registry(sources, tools)
+        registry = self._make_registry(sources, tools)
+        result = registry.get_tools()
+        assert len(result) == 1
+        assert isinstance(result[0], URLDispatcherTool)
 
     def test_unknown_action_processor_raises(self):
         sources = {

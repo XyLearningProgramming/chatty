@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from chatty.core.service.models import (
     EVENT_TYPE_CONTENT,
     EVENT_TYPE_ERROR,
+    EVENT_TYPE_QUEUED,
     EVENT_TYPE_THINKING,
     EVENT_TYPE_TOOL_CALL,
     TOOL_STATUS_COMPLETED,
@@ -30,11 +31,12 @@ class TestConstants:
     """Verify event type and tool status constants are consistent."""
 
     def test_valid_event_types(self):
+        assert EVENT_TYPE_QUEUED in VALID_EVENT_TYPES
         assert EVENT_TYPE_THINKING in VALID_EVENT_TYPES
         assert EVENT_TYPE_CONTENT in VALID_EVENT_TYPES
         assert EVENT_TYPE_TOOL_CALL in VALID_EVENT_TYPES
         assert EVENT_TYPE_ERROR in VALID_EVENT_TYPES
-        assert len(VALID_EVENT_TYPES) == 4
+        assert len(VALID_EVENT_TYPES) == 5
 
     def test_valid_tool_statuses(self):
         assert TOOL_STATUS_STARTED in VALID_TOOL_STATUSES
@@ -86,7 +88,7 @@ class TestContentEvent:
     def test_serialization(self):
         event = ContentEvent(content="hello")
         data = json.loads(event.model_dump_json())
-        assert data == {"type": "content", "content": "hello"}
+        assert data == {"type": "content", "content": "hello", "message_id": None}
 
     def test_type_is_literal(self):
         assert ContentEvent(content="x").type == "content"

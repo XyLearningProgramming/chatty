@@ -48,11 +48,11 @@ SQL_SEARCH = f"""
     FROM (
         SELECT DISTINCT ON ({COL_SOURCE_ID})
             {COL_SOURCE_ID},
-            1 - ({COL_EMBEDDING} <=> :{PARAM_QUERY_VEC}::vector) AS similarity,
-            {COL_EMBEDDING} <=> :{PARAM_QUERY_VEC}::vector AS distance
+            1 - ({COL_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector)) AS similarity,
+            {COL_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector) AS distance
         FROM {TABLE_SOURCE_EMBEDDINGS}
         WHERE {COL_MODEL_NAME} = :{PARAM_MODEL_NAME}
-          AND 1 - ({COL_EMBEDDING} <=> :{PARAM_QUERY_VEC}::vector) >= :{PARAM_THRESHOLD}
+          AND 1 - ({COL_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector)) >= :{PARAM_THRESHOLD}
         ORDER BY {COL_SOURCE_ID}, distance
     ) AS best_per_source
     ORDER BY similarity DESC

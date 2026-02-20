@@ -51,14 +51,14 @@ SQL_SEARCH_CACHED_RESPONSE = f"""
     SELECT ai.{COL_CONTENT} AS response_text, human.similarity
     FROM (
         SELECT {COL_CONVERSATION_ID}, {COL_CREATED_AT},
-               1 - ({COL_QUERY_EMBEDDING} <=> :{PARAM_QUERY_VEC}::vector) AS similarity
+               1 - ({COL_QUERY_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector)) AS similarity
         FROM {TABLE_CHAT_MESSAGES}
         WHERE {COL_ROLE} = '{ROLE_HUMAN}'
           AND {COL_QUERY_EMBEDDING} IS NOT NULL
-          AND {COL_CREATED_AT} >= now() - :{PARAM_TTL_INTERVAL}::interval
-          AND 1 - ({COL_QUERY_EMBEDDING} <=> :{PARAM_QUERY_VEC}::vector)
+          AND {COL_CREATED_AT} >= now() - CAST(:{PARAM_TTL_INTERVAL} AS interval)
+          AND 1 - ({COL_QUERY_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector))
             >= :{PARAM_THRESHOLD}
-        ORDER BY {COL_QUERY_EMBEDDING} <=> :{PARAM_QUERY_VEC}::vector
+        ORDER BY {COL_QUERY_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector)
         LIMIT 1
     ) AS human
     JOIN LATERAL (
@@ -98,7 +98,7 @@ async def search_cached_response(
         {
             PARAM_QUERY_VEC: _vec_literal(query_embedding),
             PARAM_THRESHOLD: similarity_threshold,
-            PARAM_TTL_INTERVAL: f"{int(ttl.total_seconds())} seconds",
+            PARAM_TTL_INTERVAL: ttl,
         },
     )
     row = result.first()

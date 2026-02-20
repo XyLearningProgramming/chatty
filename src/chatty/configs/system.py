@@ -63,6 +63,13 @@ class APIConfig(BaseModel):
         "event when exceeded.",
     )
 
+    send_traceback: bool = Field(
+        default=False,
+        description="Include full Python tracebacks in client-facing SSE error "
+        "events. Enable only in development; errors are always logged "
+        "server-side regardless of this setting.",
+    )
+
 
 class CacheConfig(BaseModel):
     """Cache of chat responses configuration settings."""

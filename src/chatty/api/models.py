@@ -1,10 +1,13 @@
 """Pydantic models for the chat API."""
 
+import logging
 from traceback import format_exc
 
 from pydantic import BaseModel, Field
 
 from chatty.core.service.models import ErrorEvent, StreamEvent
+
+logger = logging.getLogger(__name__)
 
 # Re-export for the API layer
 __all__ = ["ChatRequest", "StreamEvent", "ErrorEvent"]
@@ -43,10 +46,12 @@ def format_sse(event: StreamEvent) -> str:
     return f"data: {event.model_dump_json()}\n\n"
 
 
-def format_error_sse(exc: Exception) -> str:
+def format_error_sse(exc: Exception, *, send_traceback: bool = False) -> str:
     """Serialize an exception to an SSE error event."""
-    error_event = ErrorEvent(
-        message=f"An error occurred during processing: {format_exc()}",
-        code="PROCESSING_ERROR",
-    )
+    if send_traceback:
+        message = f"An error occurred during processing: {format_exc()}"
+    else:
+        message = "An internal error occurred."
+        logger.error("Hidden error full stack trace: %s", format_exc())
+    error_event = ErrorEvent(message=message, code="PROCESSING_ERROR")
     return f"data: {error_event.model_dump_json()}\n\n"

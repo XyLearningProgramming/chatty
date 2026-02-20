@@ -1,22 +1,23 @@
 """RAG chat service -- LangGraph StateGraph with semantic caching.
 
 Pipeline nodes:
-    classify_query ─┬─ (simple) → generate → END  (with /no_think)
-                    └─ (complex) → embed_query → cache_check
-                        ─┬─ (hit)  → record_cached → END
-                         └─ (miss) → retrieve_topk → build_prompt
-                                    → generate → END
+    embed_query → cache_check ─┬─ (hit)  → record_cached → END
+                               └─ (miss) → classify_query
+                                   ─┬─ (simple) → generate → END  (no_think)
+                                    └─ (complex) → retrieve_topk → build_rag_prompt
+                                                  → generate → END
 
-Trivial first-turn queries (short greetings, etc.) are classified
-up front and routed directly to ``generate`` via the no-think model
-wrapper, skipping the entire RAG pipeline.
+Every query is embedded up front so the vector is always persisted
+(including trivial no-think shortcuts and cache misses).  The cache
+is checked next; hits short-circuit the whole pipeline.  On a miss
+the classify node decides whether the query is trivial (use the
+no-think model directly) or complex (full RAG retrieval).
 
-Non-trivial queries follow the full pipeline.  First-turn queries
-(no conversation history) are eligible for semantic caching.  The
-cache is backed by the ``query_embedding`` column on
-``chat_messages``: a similar past human message is found and its
-corresponding AI response is returned.  TTL is checked at read time
-against ``created_at`` using ``CacheConfig.ttl``.
+First-turn queries (no conversation history) are eligible for
+semantic caching.  The cache is backed by the ``query_embedding``
+column on ``chat_messages``: a similar past human message is found
+and its corresponding AI response is returned.  TTL is checked at
+read time against ``created_at`` using ``CacheConfig.ttl``.
 
 Embedding is piped through the normal callback write path via
 ``query_to_human_message`` (no separate UPDATE needed).  Cache hits
@@ -80,7 +81,7 @@ NODE_EMBED_QUERY = "embed_query"
 NODE_CACHE_CHECK = "cache_check"
 NODE_RECORD_CACHED = "record_cached"
 NODE_RETRIEVE_TOPK = "retrieve_topk"
-NODE_BUILD_PROMPT = "build_prompt"
+NODE_BUILD_RAG_PROMPT = "build_rag_prompt"
 NODE_GENERATE = "generate"
 
 ROUTE_SIMPLE = "simple"
@@ -186,24 +187,24 @@ class RagChatService(ChatService):
         builder.add_node(NODE_CACHE_CHECK, self._cache_check_node)
         builder.add_node(NODE_RECORD_CACHED, self._record_cached_node)
         builder.add_node(NODE_RETRIEVE_TOPK, self._retrieve_topk_node)
-        builder.add_node(NODE_BUILD_PROMPT, self._build_prompt_node)
+        builder.add_node(NODE_BUILD_RAG_PROMPT, self._build_rag_prompt_node)
         builder.add_node(NODE_GENERATE, self._generate_node)
 
-        builder.add_edge(START, NODE_CLASSIFY)
-        builder.add_conditional_edges(
-            NODE_CLASSIFY,
-            self._route_after_classify,
-            {ROUTE_SIMPLE: NODE_GENERATE, ROUTE_COMPLEX: NODE_EMBED_QUERY},
-        )
+        builder.add_edge(START, NODE_EMBED_QUERY)
         builder.add_edge(NODE_EMBED_QUERY, NODE_CACHE_CHECK)
         builder.add_conditional_edges(
             NODE_CACHE_CHECK,
             self._route_after_cache,
-            {ROUTE_HIT: NODE_RECORD_CACHED, ROUTE_MISS: NODE_RETRIEVE_TOPK},
+            {ROUTE_HIT: NODE_RECORD_CACHED, ROUTE_MISS: NODE_CLASSIFY},
         )
         builder.add_edge(NODE_RECORD_CACHED, END)
-        builder.add_edge(NODE_RETRIEVE_TOPK, NODE_BUILD_PROMPT)
-        builder.add_edge(NODE_BUILD_PROMPT, NODE_GENERATE)
+        builder.add_conditional_edges(
+            NODE_CLASSIFY,
+            self._route_after_classify,
+            {ROUTE_SIMPLE: NODE_GENERATE, ROUTE_COMPLEX: NODE_RETRIEVE_TOPK},
+        )
+        builder.add_edge(NODE_RETRIEVE_TOPK, NODE_BUILD_RAG_PROMPT)
+        builder.add_edge(NODE_BUILD_RAG_PROMPT, NODE_GENERATE)
         builder.add_edge(NODE_GENERATE, END)
 
         return builder.compile()
@@ -360,10 +361,10 @@ class RagChatService(ChatService):
             return {KEY_TOP_RESULTS: top_results}
 
     # ------------------------------------------------------------------
-    # Node: build_prompt
+    # Node: build_rag_prompt  (assemble RAG context into system prompt)
     # ------------------------------------------------------------------
 
-    def _build_prompt_node(self, state: RagState) -> dict:
+    def _build_rag_prompt_node(self, state: RagState) -> dict:
         prompt_cfg = self._config.prompt
         llm_cfg = self._config.llm
         input_budget = llm_cfg.context_window - llm_cfg.max_tokens
@@ -403,12 +404,9 @@ class RagChatService(ChatService):
     # ------------------------------------------------------------------
 
     async def _generate_node(self, state: RagState, config: RunnableConfig) -> dict:
-        embed = (
-            state.get(KEY_QUERY_EMBEDDING)
-            if state.get(KEY_IS_FIRST_TURN) and self._cache_config.enabled
-            else None
+        human = query_to_human_message(
+            state[KEY_QUERY], embedding=state.get(KEY_QUERY_EMBEDDING)
         )
-        human = query_to_human_message(state[KEY_QUERY], embedding=embed)
 
         messages: list[BaseMessage] = [
             SystemMessage(content=state[KEY_ENRICHED_PROMPT]),

@@ -45,6 +45,7 @@ async def sse_stream(
     *,
     request_timeout: timedelta,
     service_name: str = "",
+    send_traceback: bool = False,
     on_finish: Callable[[], Awaitable[None]] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Format domain events as SSE with timeout, error handling, and metrics.
@@ -118,7 +119,7 @@ async def sse_stream(
             code = "PROCESSING_ERROR"
             span.record_exception(e)
             logger.warning("Unexpected error in SSE stream", exc_info=True)
-            yield format_error_sse(e)
+            yield format_error_sse(e, send_traceback=send_traceback)
         finally:
             span.set_attribute(ATTR_SSE_ERROR_CODE, code)
             span.set_attribute(ATTR_SSE_EVENT_COUNTS, json.dumps(event_counts))
