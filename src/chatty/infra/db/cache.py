@@ -51,7 +51,8 @@ SQL_SEARCH_CACHED_RESPONSE = f"""
     SELECT ai.{COL_CONTENT} AS response_text, human.similarity
     FROM (
         SELECT {COL_CONVERSATION_ID}, {COL_CREATED_AT},
-               1 - ({COL_QUERY_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector)) AS similarity
+               1 - ({COL_QUERY_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector))
+                   AS similarity
         FROM {TABLE_CHAT_MESSAGES}
         WHERE {COL_ROLE} = '{ROLE_HUMAN}'
           AND {COL_QUERY_EMBEDDING} IS NOT NULL

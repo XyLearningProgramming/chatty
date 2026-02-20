@@ -52,7 +52,8 @@ SQL_SEARCH = f"""
             {COL_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector) AS distance
         FROM {TABLE_SOURCE_EMBEDDINGS}
         WHERE {COL_MODEL_NAME} = :{PARAM_MODEL_NAME}
-          AND 1 - ({COL_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector)) >= :{PARAM_THRESHOLD}
+          AND 1 - ({COL_EMBEDDING} <=> CAST(:{PARAM_QUERY_VEC} AS vector))
+              >= :{PARAM_THRESHOLD}
         ORDER BY {COL_SOURCE_ID}, distance
     ) AS best_per_source
     ORDER BY similarity DESC
