@@ -46,11 +46,7 @@ from .system import (
 # ---------------------------------------------------------------------------
 
 CONFIG_PY_PATH = Path(__file__).resolve()
-_RELATIVE_ROOT = CONFIG_PY_PATH.parent.parent.parent.parent
-_CWD_ROOT = Path.cwd()
-PROJECT_ROOT = (
-    _RELATIVE_ROOT if (_RELATIVE_ROOT / "configs").is_dir() else _CWD_ROOT
-)
+PROJECT_ROOT = CONFIG_PY_PATH.parent.parent.parent.parent
 CONFIG_DIR = PROJECT_ROOT / "configs"
 
 # YAML config file.  Baked into the Docker image at build time;
