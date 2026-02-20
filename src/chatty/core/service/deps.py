@@ -12,7 +12,7 @@ from langchain_core.language_models import BaseLanguageModel
 from chatty.configs.config import AppConfig, get_app_config
 from chatty.core.embedding.cron import get_embedder, get_embedding_repository
 from chatty.core.embedding.gated import GatedEmbedModel
-from chatty.core.llm import get_gated_llm
+from chatty.core.llm import get_gated_llm, get_no_think_llm
 from chatty.core.service.one_step import OneStepChatService
 from chatty.core.service.rag import RagChatService
 from chatty.infra.db import (
@@ -40,6 +40,7 @@ _known_agents: dict[str, type[ChatService]] = {
 
 def get_chat_service(
     llm: Annotated[BaseLanguageModel, Depends(get_gated_llm)],
+    no_think_llm: Annotated[BaseLanguageModel, Depends(get_no_think_llm)],
     tools_registry: Annotated[ToolRegistry, Depends(get_tool_registry)],
     config: Annotated[AppConfig, Depends(get_app_config)],
     pg_callback_factory: Annotated[PgCallbackFactory, Depends(get_pg_callback_factory)],
@@ -70,6 +71,7 @@ def get_chat_service(
     if agent_cls is RagChatService:
         return agent_cls(
             llm,
+            no_think_llm,
             config,
             embedder,
             embedding_repository,

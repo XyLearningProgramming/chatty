@@ -1,5 +1,5 @@
 
-.PHONY: help install test test-unit test-e2e test-golden lint format typecheck check dev db-upgrade clean
+.PHONY: help install test test-unit test-e2e test-golden lint format typecheck check dev cli db-upgrade clean
 
 # Project root (directory containing this Makefile). Ensures .env is loaded from repo root
 # even when make is invoked from a subdirectory.
@@ -18,6 +18,7 @@ help:
 	@echo "  typecheck   - Run type checking"
 	@echo "  check       - Run all code quality checks (lint + typecheck)"
 	@echo "  dev         - Start development server with reload"
+	@echo "  cli         - Start interactive CLI (cli/)"
 	@echo "  db-upgrade  - Run Alembic migrations to head"
 	@echo "  clean       - Clean up generated files"
 
@@ -52,6 +53,9 @@ check: lint typecheck
 # Development
 dev:
 	uv run --env-file $(ROOT).env uvicorn chatty.app:app --host 0.0.0.0 --port 8080 --reload
+
+cli:
+	cd $(ROOT) && uv run --env-file $(ROOT).env python -m cli
 
 # Database
 db-upgrade:

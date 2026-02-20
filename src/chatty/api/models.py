@@ -6,9 +6,6 @@ from pydantic import BaseModel, Field
 
 from chatty.core.service.models import ErrorEvent, StreamEvent
 
-# Maximum length for chat query input, only short queries are allowed
-CHAT_QUERY_MAX_LENGTH = 1024
-
 # Re-export for the API layer
 __all__ = ["ChatRequest", "StreamEvent", "ErrorEvent"]
 
@@ -26,7 +23,7 @@ class ChatRequest(BaseModel):
     """
 
     query: str = Field(
-        description="User query to process", max_length=CHAT_QUERY_MAX_LENGTH
+        description="User query to process", max_length=512,
     )
     conversation_id: str | None = Field(
         default=None,

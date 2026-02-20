@@ -111,6 +111,10 @@ class PgChatMessageHistory(BaseChatMessageHistory):
                     exc_info=True,
                 )
 
+    def clear(self) -> None:
+        """Sync clear is not supported; use aclear() instead."""
+        raise NotImplementedError("Use aclear() for async history clearing")
+
     async def aclear(self) -> None:
         """Remove all messages for this conversation."""
         try:

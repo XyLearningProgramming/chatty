@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from chatty.core.llm.gated import PromptBudgetExceeded
 from chatty.core.service.metrics import (
     DEDUP_REJECTIONS_TOTAL,
     INBOX_REJECTIONS_TOTAL,
@@ -24,6 +25,15 @@ async def build_exception_handlers(
     app: Annotated[FastAPI, Depends(get_app)],
 ) -> AsyncGenerator[None, None]:
     """Register custom exception handlers on ``app``."""
+
+    @app.exception_handler(PromptBudgetExceeded)
+    async def handle_prompt_budget_exceeded(
+        request: Request, exc: PromptBudgetExceeded
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": str(exc), "code": "PROMPT_BUDGET_EXCEEDED"},
+        )
 
     @app.exception_handler(AcquireTimeout)
     async def handle_acquire_timeout(

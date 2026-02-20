@@ -97,7 +97,13 @@ class LLMConfig(BaseModel):
         "gpt-3.5-turbo", description="Name of the language model to use"
     )
     max_tokens: int = Field(
-        default=4096, description="Maximum tokens to generate in a response"
+        default=512, description="Maximum tokens to generate in a response"
+    )
+    context_window: int = Field(
+        default=2048,
+        description="Server context window size in tokens. "
+        "Prompt assembly will truncate input to fit within "
+        "context_window - max_tokens.",
     )
     temperature: float = Field(
         default=0.1, description="Sampling temperature for model responses"
@@ -154,6 +160,17 @@ class ChatConfig(BaseModel):
         "invocation (fetch + post-processing).",
     )
 
+    rag_no_think_enabled: bool = Field(
+        default=True,
+        description="(RAG only) Inject /no_think for trivial first-turn queries "
+        "to skip LLM reasoning and bypass the RAG pipeline.",
+    )
+    rag_no_think_max_chars: int = Field(
+        default=15,
+        description="(RAG only) Maximum query length (chars, after strip) to "
+        "classify as trivial for the /no_think shortcut.",
+    )
+
 
 class EmbeddingConfig(BaseModel):
     """Configuration for the OpenAI-compatible embedding endpoint."""
@@ -172,7 +189,14 @@ class EmbeddingConfig(BaseModel):
     )
     dimensions: int = Field(
         default=1024,
-        description="Embedding vector dimensionality",
+        description="Embedding vector dimensionality. "
+        "Must match EMBEDDING_DIMENSIONS in infra/db/models.py; "
+        "changing the DDL column width requires an alembic migration.",
+    )
+    max_input_tokens: int = Field(
+        default=512,
+        description="Maximum tokens for a single embedding input. "
+        "Texts exceeding this are truncated before the API call.",
     )
 
 

@@ -1,12 +1,19 @@
 """RAG chat service -- LangGraph StateGraph with semantic caching.
 
 Pipeline nodes:
-    embed_query  → cache_check ─┬─ (hit)  → record_cached → END
-                                └─ (miss) → retrieve_topk → build_prompt
-                                           → generate → END
+    classify_query ─┬─ (simple) → generate → END  (with /no_think)
+                    └─ (complex) → embed_query → cache_check
+                        ─┬─ (hit)  → record_cached → END
+                         └─ (miss) → retrieve_topk → build_prompt
+                                    → generate → END
 
-First-turn queries (no conversation history) are eligible for semantic
-caching.  The cache is backed by the ``query_embedding`` column on
+Trivial first-turn queries (short greetings, etc.) are classified
+up front and routed directly to ``generate`` via the no-think model
+wrapper, skipping the entire RAG pipeline.
+
+Non-trivial queries follow the full pipeline.  First-turn queries
+(no conversation history) are eligible for semantic caching.  The
+cache is backed by the ``query_embedding`` column on
 ``chat_messages``: a similar past human message is found and its
 corresponding AI response is returned.  TTL is checked at read time
 against ``created_at`` using ``CacheConfig.ttl``.
@@ -53,6 +60,7 @@ from chatty.infra.telemetry import (
     SPAN_RAG_RETRIEVE,
     tracer,
 )
+from chatty.infra.tokens import estimate_tokens
 
 from .metrics import (
     RAG_CACHE_LOOKUPS_TOTAL,
@@ -67,6 +75,7 @@ logger = logging.getLogger(__name__)
 # Node / edge / stream-mode constants  (avoid magic strings)
 # ---------------------------------------------------------------------------
 
+NODE_CLASSIFY = "classify_query"
 NODE_EMBED_QUERY = "embed_query"
 NODE_CACHE_CHECK = "cache_check"
 NODE_RECORD_CACHED = "record_cached"
@@ -74,6 +83,8 @@ NODE_RETRIEVE_TOPK = "retrieve_topk"
 NODE_BUILD_PROMPT = "build_prompt"
 NODE_GENERATE = "generate"
 
+ROUTE_SIMPLE = "simple"
+ROUTE_COMPLEX = "complex"
 ROUTE_HIT = "hit"
 ROUTE_MISS = "miss"
 
@@ -94,6 +105,7 @@ KEY_CACHE_HIT = "cache_hit"
 KEY_TOP_RESULTS = "top_results"
 KEY_ENRICHED_PROMPT = "enriched_prompt"
 KEY_RESPONSE_TEXT = "response_text"
+KEY_SKIP_THINKING = "skip_thinking"
 
 # ---------------------------------------------------------------------------
 # Prompt constants
@@ -114,6 +126,7 @@ class RagState(TypedDict, total=False):
 
     query_embedding: list[float]
     is_first_turn: bool
+    skip_thinking: bool
 
     cache_hit: str | None
 
@@ -140,6 +153,7 @@ class RagChatService(ChatService):
     def __init__(
         self,
         llm: BaseLanguageModel,
+        llm_no_think: BaseLanguageModel,
         config: AppConfig,
         embedder: GatedEmbedModel,
         embedding_repository: EmbeddingRepository,
@@ -147,6 +161,7 @@ class RagChatService(ChatService):
         cache_repository: CacheRepository,
     ) -> None:
         self._llm = llm
+        self._llm_no_think = llm_no_think
         self._config = config
         self._embedder = embedder
         self._embedding_repository = embedding_repository
@@ -166,6 +181,7 @@ class RagChatService(ChatService):
     def _build_graph(self):
         builder: StateGraph = StateGraph(RagState)
 
+        builder.add_node(NODE_CLASSIFY, self._classify_query_node)
         builder.add_node(NODE_EMBED_QUERY, self._embed_query_node)
         builder.add_node(NODE_CACHE_CHECK, self._cache_check_node)
         builder.add_node(NODE_RECORD_CACHED, self._record_cached_node)
@@ -173,7 +189,12 @@ class RagChatService(ChatService):
         builder.add_node(NODE_BUILD_PROMPT, self._build_prompt_node)
         builder.add_node(NODE_GENERATE, self._generate_node)
 
-        builder.add_edge(START, NODE_EMBED_QUERY)
+        builder.add_edge(START, NODE_CLASSIFY)
+        builder.add_conditional_edges(
+            NODE_CLASSIFY,
+            self._route_after_classify,
+            {ROUTE_SIMPLE: NODE_GENERATE, ROUTE_COMPLEX: NODE_EMBED_QUERY},
+        )
         builder.add_edge(NODE_EMBED_QUERY, NODE_CACHE_CHECK)
         builder.add_conditional_edges(
             NODE_CACHE_CHECK,
@@ -194,6 +215,40 @@ class RagChatService(ChatService):
     @staticmethod
     def _route_after_cache(state: RagState) -> str:
         return ROUTE_HIT if state.get(KEY_CACHE_HIT) else ROUTE_MISS
+
+    @staticmethod
+    def _route_after_classify(state: RagState) -> str:
+        return ROUTE_SIMPLE if state.get(KEY_SKIP_THINKING) else ROUTE_COMPLEX
+
+    # ------------------------------------------------------------------
+    # Node: classify_query
+    # ------------------------------------------------------------------
+
+    def _classify_query_node(self, state: RagState) -> dict:
+        """Classify the query as trivial or complex.
+
+        Trivial first-turn queries (short greetings, etc.) skip the full
+        RAG pipeline and go straight to generate via the no-think model.
+        """
+        chat_cfg = self._config.chat
+        if not chat_cfg.rag_no_think_enabled:
+            return {KEY_SKIP_THINKING: False}
+
+        is_first_turn = state.get(KEY_IS_FIRST_TURN, False)
+        query_len = len(state[KEY_QUERY].strip())
+        is_trivial = is_first_turn and query_len <= chat_cfg.rag_no_think_max_chars
+
+        if is_trivial:
+            logger.debug(
+                "classify_query: trivial (%d chars, first_turn=%s) — skipping RAG",
+                query_len,
+                is_first_turn,
+            )
+            return {
+                KEY_SKIP_THINKING: True,
+                KEY_ENRICHED_PROMPT: self._system_prompt,
+            }
+        return {KEY_SKIP_THINKING: False}
 
     # ------------------------------------------------------------------
     # Node: embed_query
@@ -310,15 +365,32 @@ class RagChatService(ChatService):
 
     def _build_prompt_node(self, state: RagState) -> dict:
         prompt_cfg = self._config.prompt
+        llm_cfg = self._config.llm
+        input_budget = llm_cfg.context_window - llm_cfg.max_tokens
+
+        base_cost = estimate_tokens(self._system_prompt)
+        query_cost = estimate_tokens(state.get(KEY_QUERY, ""))
+        remaining = input_budget - base_cost - query_cost
+
         context_parts: list[str] = []
         for source_id, content, sim in state.get(KEY_TOP_RESULTS, []):
-            context_parts.append(
-                prompt_cfg.render_rag_context_section(
-                    source_id=source_id,
-                    similarity=sim,
-                    content=content,
-                )
+            section = prompt_cfg.render_rag_context_section(
+                source_id=source_id,
+                similarity=sim,
+                content=content,
             )
+            section_cost = estimate_tokens(section)
+            if section_cost > remaining:
+                logger.debug(
+                    "RAG budget full — dropping source '%s' "
+                    "(need %d tokens, %d remaining)",
+                    source_id,
+                    section_cost,
+                    remaining,
+                )
+                continue
+            context_parts.append(section)
+            remaining -= section_cost
 
         enriched = prompt_cfg.render_rag_prompt(
             base=self._system_prompt,
@@ -343,7 +415,8 @@ class RagChatService(ChatService):
             *state.get(KEY_HISTORY, []),
             human,
         ]
-        response = await self._llm.ainvoke(messages, config=config)
+        llm = self._llm_no_think if state.get(KEY_SKIP_THINKING) else self._llm
+        response = await llm.ainvoke(messages, config=config)
         return {KEY_RESPONSE_TEXT: response.content or ""}
 
     # ------------------------------------------------------------------

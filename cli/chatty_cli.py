@@ -19,7 +19,7 @@ class ChattyCLI:
         config: CLIConfig,
         input_stream: TextIO = sys.stdin,
         output_stream: TextIO = sys.stdout,
-        show_thinking: bool = False,
+        show_thinking: bool = True,
     ):
         """Initialize the CLI.
 

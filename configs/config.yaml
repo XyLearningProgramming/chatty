@@ -15,7 +15,8 @@ llm:
   # endpoint: "http://localhost:8000/api/v1/"  # inject via CHATTY_LLM__ENDPOINT
   # api_key: ""                                # inject via CHATTY_LLM__API_KEY
   model_name: "gpt-3.5-turbo"
-  max_tokens: 4096
+  max_tokens: 512
+  context_window: 2048
   temperature: 0.1
   top_p: 0.9
   model_timeout: "PT5M"
@@ -42,9 +43,11 @@ cache:
 
 # --- Chat ---
 chat:
-  agent_name: one_step
+  agent_name: rag
   max_conversation_length: 3
   tool_timeout: "PT1M"
+  rag_no_think_enabled: true
+  rag_no_think_max_chars: 15
 
 # --- Embedding (non-secret tunables) ---
 embedding:
@@ -52,6 +55,7 @@ embedding:
   # api_key: ""                                # inject via CHATTY_EMBEDDING__API_KEY
   model_name: "Qwen3-0.6B"
   dimensions: 1024
+  max_input_tokens: 512
 
 # --- RAG ---
 rag:
@@ -110,6 +114,9 @@ persona:
       content_url: "https://x3huang.dev/resume"
       timeout: "PT30S"
       cache_ttl: "PT6H"
+      processors:
+        - name: truncate
+          max_length: 1500
 
     blog_posts:
       description: >
@@ -120,7 +127,7 @@ persona:
       cache_ttl: "P1D"
       processors:
         - name: truncate
-          max_length: 4000
+          max_length: 1500
 
   # Layer 2: Tool actions (exposed to OneStep agent)
   tools:
@@ -129,7 +136,7 @@ persona:
       sources: [current_homepage, resume, blog_posts]
       processors:
         - name: truncate
-          max_length: 4000
+          max_length: 1500
       description: >
         Look up external information that you don't already know.
         Call when the user asks about something that requires
@@ -143,7 +150,7 @@ persona:
         - "homepage and online presence"
       processors:
         - name: truncate
-          max_length: 2000
+          max_length: 1000
 
     - source: resume
       match_hints:
@@ -152,7 +159,7 @@ persona:
         - "education and qualifications"
       processors:
         - name: truncate
-          max_length: 3000
+          max_length: 1500
 
     - source: blog_posts
       match_hints:
@@ -162,4 +169,4 @@ persona:
         - "Unity game development"
       processors:
         - name: truncate
-          max_length: 3000
+          max_length: 1500

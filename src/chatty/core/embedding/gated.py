@@ -14,6 +14,7 @@ import openai
 from chatty.configs.system import EmbeddingConfig
 from chatty.core.service.metrics import (
     EMBEDDING_CALLS_IN_FLIGHT,
+    EMBEDDING_INPUT_TOKENS,
     EMBEDDING_LATENCY_SECONDS,
 )
 from chatty.infra.concurrency.semaphore import ModelSemaphore
@@ -23,6 +24,7 @@ from chatty.infra.telemetry import (
     SPAN_EMBEDDING_EMBED,
     tracer,
 )
+from chatty.infra.tokens import estimate_tokens, truncate_to_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +49,14 @@ class GatedEmbedModel:
         return self._config.model_name
 
     async def embed(self, text: str) -> list[float]:
-        """Return the embedding vector for *text* (gated)."""
+        """Return the embedding vector for *text* (gated).
+
+        Input is truncated to ``max_input_tokens`` before the API call.
+        """
+        text = truncate_to_tokens(text, self._config.max_input_tokens)
+        EMBEDDING_INPUT_TOKENS.labels(
+            model_name=self._config.model_name
+        ).observe(estimate_tokens(text))
         with tracer.start_as_current_span(SPAN_EMBEDDING_EMBED) as span:
             span.set_attribute(ATTR_EMBEDDING_MODEL, self._config.model_name)
             span.set_attribute(ATTR_EMBEDDING_TEXT_LEN, len(text))
@@ -73,4 +82,9 @@ class GatedEmbedModel:
             EMBEDDING_LATENCY_SECONDS.labels(operation="embed").observe(
                 time.monotonic() - start
             )
-            return response.data[0].embedding
+            embedding = response.data[0].embedding
+            # Some local model servers (e.g. vLLM) wrap the vector in an
+            # extra list, returning [[…]] instead of the standard flat [… ].
+            if embedding and isinstance(embedding[0], list):
+                embedding = embedding[0]
+            return embedding

@@ -5,7 +5,7 @@ Transforms the raw (message_chunk, metadata) tuples produced by
 events (ContentEvent, ThinkingEvent, ToolCallEvent).
 """
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from langchain_core.messages import AIMessageChunk, ToolMessage
 
@@ -15,6 +15,9 @@ from .models import (
     ThinkingEvent,
     ToolCallEvent,
 )
+
+_THINK_OPEN = "<think>"
+_THINK_CLOSE = "</think>"
 
 
 async def map_langgraph_stream(
@@ -28,8 +31,12 @@ async def map_langgraph_stream(
     - ``ToolMessage`` → tool result (completed / error)
 
     The *metadata* dict carries ``langgraph_node`` which tells us whether
-    the chunk originates from the ``"agent"`` node (LLM) or the
-    ``"tools"`` node (tool execution).
+    the chunk originates from the LLM node or the ``"tools"`` node
+    (tool execution).
+
+    Inline ``<think>...</think>`` blocks (e.g. Qwen3 reasoning) are
+    automatically reclassified from ``ContentEvent`` to ``ThinkingEvent``
+    so downstream consumers never see raw think tags.
 
     Args:
         raw_stream: async iterable of (BaseMessageChunk, metadata) from
@@ -38,10 +45,66 @@ async def map_langgraph_stream(
     Yields:
         Domain ``StreamEvent`` instances.
     """
+    in_thinking = False
+    strip_leading_newlines = False
     async for chunk, metadata in raw_stream:
         event = _map_chunk(chunk, metadata)
-        if event is not None:
+        if event is None:
+            continue
+
+        if not isinstance(event, ContentEvent):
             yield event
+            continue
+
+        was_thinking = in_thinking
+        events, in_thinking = _split_thinking(event.content, in_thinking)
+        if was_thinking and not in_thinking:
+            strip_leading_newlines = True
+
+        for sub_event in events:
+            if strip_leading_newlines and isinstance(sub_event, ContentEvent):
+                stripped = sub_event.content.lstrip("\n")
+                if not stripped:
+                    continue
+                sub_event = ContentEvent(content=stripped)
+            strip_leading_newlines = False
+            yield sub_event
+
+
+def _split_thinking(
+    text: str, in_thinking: bool
+) -> tuple[list[ThinkingEvent | ContentEvent], bool]:
+    """Split *text* at ``<think>`` / ``</think>`` boundaries.
+
+    Returns a list of ``ThinkingEvent`` / ``ContentEvent`` fragments
+    (tags stripped, empty fragments dropped) **and** the resulting
+    ``in_thinking`` state.  Returning state explicitly ensures the
+    caller tracks mode transitions even when a tag-only chunk produces
+    no output events.
+    """
+    events: list[ThinkingEvent | ContentEvent] = []
+    while text:
+        if in_thinking:
+            idx = text.find(_THINK_CLOSE)
+            if idx == -1:
+                events.append(ThinkingEvent(content=text))
+                return events, True
+            before = text[:idx]
+            if before:
+                events.append(ThinkingEvent(content=before))
+            text = text[idx + len(_THINK_CLOSE) :].lstrip("\n")
+            in_thinking = False
+        else:
+            idx = text.find(_THINK_OPEN)
+            if idx == -1:
+                events.append(ContentEvent(content=text))
+                return events, False
+            before = text[:idx]
+            if before:
+                events.append(ContentEvent(content=before))
+            text = text[idx + len(_THINK_OPEN) :]
+            in_thinking = True
+    return events, in_thinking
 
 
 def _map_chunk(chunk, metadata: dict) -> StreamEvent | None:
@@ -50,18 +113,17 @@ def _map_chunk(chunk, metadata: dict) -> StreamEvent | None:
 
     # --- AIMessageChunk from the LLM ---
     if isinstance(chunk, AIMessageChunk):
-        # Tool call initiation (function-calling)
         if chunk.tool_call_chunks:
             return _map_tool_call_start(chunk)
 
-        # Text content
         content = chunk.content
         if not content:
             return None
 
-        # Text from the "agent" node is the final user-facing answer;
-        # text from any other node is intermediate thinking.
-        if node == "agent":
+        # LLM-node text is initially tagged as ContentEvent;
+        # _split_thinking in the caller reclassifies think-tagged
+        # fragments to ThinkingEvent.
+        if node in ("agent", "model"):
             return ContentEvent(content=content)
         return ThinkingEvent(content=content)
 
@@ -78,12 +140,9 @@ def _map_tool_call_start(chunk: AIMessageChunk) -> ToolCallEvent | None:
     name = tc.get("name") or ""
     args = tc.get("args")
 
-    # LangGraph streams tool-call arguments incrementally; only emit on
-    # the first chunk that carries the tool *name*.
     if not name:
         return None
 
-    # ``args`` may be a string (partial JSON) or a dict; try to normalise.
     arguments: dict | None = None
     if isinstance(args, dict):
         arguments = args

@@ -162,6 +162,30 @@ EMBEDDING_CALLS_IN_FLIGHT = Gauge(
     ["model_name"],
 )
 
+# ---------------------------------------------------------------------------
+# Token budget metrics
+# ---------------------------------------------------------------------------
+
+LLM_INPUT_TOKENS = Histogram(
+    "chatty_llm_input_tokens",
+    "Estimated input tokens sent to the LLM (after trimming)",
+    ["model_name"],
+    buckets=(64, 128, 256, 512, 1024, 1536, 2048),
+)
+
+LLM_PROMPT_TRIMMED_TOTAL = Counter(
+    "chatty_llm_prompt_trimmed_total",
+    "Times conversation history was trimmed to fit context window",
+    ["model_name"],
+)
+
+EMBEDDING_INPUT_TOKENS = Histogram(
+    "chatty_embedding_input_tokens",
+    "Estimated input tokens sent to the embedding API",
+    ["model_name"],
+    buckets=(16, 32, 64, 128, 256, 512),
+)
+
 
 # ---------------------------------------------------------------------------
 # HTTP instrumentation (must run before app starts)
