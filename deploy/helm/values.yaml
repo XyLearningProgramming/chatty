@@ -52,11 +52,18 @@ resources:
     cpu: 10m
     memory: 32Mi
 
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 5
+  failureThreshold: 24
+  timeoutSeconds: 2
+
 livenessProbe:
   httpGet:
     path: /health
     port: http
-  initialDelaySeconds: 15
   timeoutSeconds: 2
   periodSeconds: 10
   failureThreshold: 3
@@ -65,7 +72,6 @@ readinessProbe:
   httpGet:
     path: /health
     port: http
-  initialDelaySeconds: 5
   timeoutSeconds: 2
   periodSeconds: 5
   failureThreshold: 3
