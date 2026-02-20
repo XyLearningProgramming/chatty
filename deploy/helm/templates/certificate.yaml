@@ -1,4 +1,7 @@
-# Certificate copied from cert-manager to avoid duplicate requests to acme server.
+{{- if .Values.tls.enabled -}}
+# TLS certificate replicated from cert-manager namespace.
+# The replicator controller populates tls.crt/tls.key from the source secret.
+# Type is Opaque so Helm doesn't conflict with the replicator on upgrades.
 # Ref: https://github.com/mittwald/kubernetes-replicator
 apiVersion: v1
 kind: Secret
@@ -9,4 +12,5 @@ metadata:
     app: {{ include "chatty.fullname" . }}
   annotations:
     replicator.v1.mittwald.de/replicate-from: cert-manager/{{ .Values.DOMAIN }}-tls
-type: {{ .Values.tlsCertificate.type }}
+type: Opaque
+{{- end }}

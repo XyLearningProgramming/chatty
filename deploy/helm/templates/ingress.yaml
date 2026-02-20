@@ -14,10 +14,12 @@ spec:
   {{- with .Values.ingress.className }}
   ingressClassName: {{ . }}
   {{- end }}
+  {{- if .Values.tls.enabled }}
   tls:
   - secretName: {{ .Values.DOMAIN }}-tls
     hosts:
       - {{ .Values.DOMAIN }}
+  {{- end }}
   rules:
     - host: {{ .Values.DOMAIN }}
       http:

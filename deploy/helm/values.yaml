@@ -5,8 +5,8 @@ replicaCount: 1
 
 DOMAIN: x3huang.dev
 
-tlsCertificate:
-  type: kubernetes.io/tls
+tls:
+  enabled: false
 
 image:
   repository: ""   # required -- set via --set or CI
