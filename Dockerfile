@@ -13,7 +13,7 @@ COPY src/ src/
 COPY configs/ configs/
 COPY alembic.ini ./
 COPY alembic/ alembic/
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-editable
 
 # --- Runtime stage ---
 FROM python:3.13-slim
