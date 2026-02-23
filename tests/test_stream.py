@@ -12,7 +12,11 @@ from chatty.core.service.models import (
     ThinkingEvent,
     ToolCallEvent,
 )
-from chatty.core.service.stream import map_llm_stream, normalize_tool_call
+from chatty.core.service.stream import (
+    chunk_to_thinking_and_content,
+    map_llm_stream,
+    normalize_tool_call,
+)
 
 
 async def _async_iter(items):
@@ -43,6 +47,32 @@ class TestNormalizeToolCall:
     def test_missing_name_returns_none(self):
         assert normalize_tool_call({"args": "{}", "id": "c1"}) is None
         assert normalize_tool_call({"function": {"arguments": "{}"}}) is None
+
+
+# ---------------------------------------------------------------------------
+# chunk_to_thinking_and_content (RAG: thinking + content only, no tool_call)
+# ---------------------------------------------------------------------------
+
+
+class TestChunkToThinkingAndContent:
+    def test_content_only(self):
+        chunk = AIMessageChunk(content="Hello")
+        events = list(chunk_to_thinking_and_content(chunk))
+        assert len(events) == 1
+        assert isinstance(events[0], ContentEvent)
+        assert events[0].content == "Hello"
+
+    def test_reasoning_and_content(self):
+        chunk = AIMessageChunk(
+            content="Answer.",
+            additional_kwargs={"reasoning_content": "Think."},
+        )
+        events = list(chunk_to_thinking_and_content(chunk))
+        assert len(events) == 2
+        assert isinstance(events[0], ThinkingEvent)
+        assert events[0].content == "Think."
+        assert isinstance(events[1], ContentEvent)
+        assert events[1].content == "Answer."
 
 
 # ---------------------------------------------------------------------------

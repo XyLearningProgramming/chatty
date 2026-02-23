@@ -9,7 +9,7 @@ accumulates the message for the tool-call loop.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 from langchain_core.messages import AIMessageChunk
@@ -62,6 +62,15 @@ def _reasoning_from_chunk(chunk: AIMessageChunk) -> str | None:
         return content
     kwargs = getattr(chunk, "additional_kwargs", None) or {}
     return kwargs.get("reasoning_content")
+
+
+def chunk_to_thinking_and_content(chunk: AIMessageChunk) -> Iterator[StreamEvent]:
+    """Yield only ThinkingEvent and ContentEvent for a chunk (e.g. RAG; no tool calls)."""
+    reasoning = _reasoning_from_chunk(chunk)
+    if reasoning:
+        yield ThinkingEvent(content=reasoning)
+    if chunk.content:
+        yield ContentEvent(content=chunk.content)
 
 
 async def map_llm_stream(
