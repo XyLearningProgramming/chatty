@@ -43,7 +43,7 @@ ingress:
   path: /api/v1/chatty
   pathType: Prefix
 
-# Target node: active-nerd-2 (3 CPU / 2 GiB RAM).
+# Target node: active-nerd-2.localdomain (3 CPU / 2 GiB RAM).
 # Other workloads already consume ~190m / 2250m CPU, ~702Mi / 2288Mi mem.
 # Chatty is I/O-bound (proxies to external LLM APIs), so CPU stays low.
 # Actual node usage is ~40%; limits are overcommitted but real peak
