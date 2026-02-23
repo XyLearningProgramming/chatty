@@ -69,6 +69,7 @@ from .metrics import (
     RAG_SOURCES_RETURNED,
 )
 from .models import ChatContext, ChatService, ContentEvent, StreamEvent
+from .stream import chunk_to_thinking_and_content
 
 logger = logging.getLogger(__name__)
 
@@ -458,8 +459,9 @@ class RagChatService(ChatService):
             ):
                 if mode == STREAM_MODE_MESSAGES:
                     chunk, _metadata = data
-                    if isinstance(chunk, AIMessageChunk) and chunk.content:
-                        yield ContentEvent(content=chunk.content)
+                    if isinstance(chunk, AIMessageChunk):
+                        for event in chunk_to_thinking_and_content(chunk):
+                            yield event
 
                 elif mode == STREAM_MODE_UPDATES:
                     if not isinstance(data, dict):

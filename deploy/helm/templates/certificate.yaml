@@ -1,16 +1,2 @@
-{{- if .Values.tls.enabled -}}
-# TLS certificate replicated from cert-manager namespace.
-# The replicator controller populates tls.crt/tls.key from the source secret.
-# Type is Opaque so Helm doesn't conflict with the replicator on upgrades.
-# Ref: https://github.com/mittwald/kubernetes-replicator
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ .Values.DOMAIN }}-tls
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app: {{ include "chatty.fullname" . }}
-  annotations:
-    replicator.v1.mittwald.de/replicate-from: cert-manager/{{ .Values.DOMAIN }}-tls
-type: Opaque
-{{- end }}
+# TLS secret is managed by helm.x3huang.dev/backend chart via kubernetes-replicator.
+# The ingress references the replicated secret when tls.enabled=true.

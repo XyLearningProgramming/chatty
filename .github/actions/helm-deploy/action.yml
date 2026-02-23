@@ -21,6 +21,9 @@ inputs:
   github_token:
     description: 'GitHub token for Helm installation'
     required: true
+  target_node:
+    description: 'Kubernetes node hostname to pin the pod to'
+    required: false
 
 runs:
   using: 'composite'
@@ -60,6 +63,7 @@ runs:
           --create-namespace \
           --set image.repository=${{ inputs.registry_repository }} \
           --set image.tag="${{ inputs.image_tag }}" \
+          ${{ inputs.target_node && format('--set nodeSelector."kubernetes\.io/hostname"="{0}"', inputs.target_node) || '' }} \
           --set metrics.podMonitor.enabled=true \
           --set-file "configMapData.config\.yaml=configs/config.yaml" \
           --wait \

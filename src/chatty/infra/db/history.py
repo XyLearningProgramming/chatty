@@ -9,7 +9,7 @@ import logging
 from collections.abc import Callable
 
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -85,6 +85,7 @@ class PgChatMessageHistory(BaseChatMessageHistory):
             messages = [
                 m for row in reversed(rows) if (m := row_to_message(row)) is not None
             ]
+            messages = self._strip_orphaned_tool_calls(messages)
             span.set_attribute(ATTR_HISTORY_MESSAGE_COUNT, len(messages))
             logger.debug(
                 "Loaded %d messages for conversation %s",
@@ -92,6 +93,26 @@ class PgChatMessageHistory(BaseChatMessageHistory):
                 self.conversation_id,
             )
             return messages
+
+    @staticmethod
+    def _strip_orphaned_tool_calls(
+        messages: list[BaseMessage],
+    ) -> list[BaseMessage]:
+        """Strip trailing AIMessages whose tool_calls lack ToolMessage results.
+
+        When a previous request fails mid-tool-loop the DB ends up with an
+        AIMessage carrying ``tool_calls`` but no subsequent ``ToolMessage``.
+        Feeding that to the LLM produces API errors or confuses the model.
+        """
+        while (
+            messages and isinstance(messages[-1], AIMessage) and messages[-1].tool_calls
+        ):
+            logger.warning(
+                "Stripping orphaned tool-call AIMessage (id=%s) from history",
+                messages[-1].id,
+            )
+            messages.pop()
+        return messages
 
     async def aadd_messages(self, messages: list[BaseMessage]) -> None:
         """Append messages; requires trace_id. Fire-and-forget (log on error)."""

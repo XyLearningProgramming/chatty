@@ -18,21 +18,32 @@ class ThirdPartyConfig(BaseModel):
         description="PostgreSQL connection URI (asyncpg driver)",
     )
     postgres_pool_size: int = Field(
-        default=5,
+        default=1,
         description="SQLAlchemy connection pool size",
     )
     postgres_max_overflow: int = Field(
-        default=10,
+        default=1,
         description="SQLAlchemy max overflow connections beyond pool_size",
     )
     redis_uri: str = Field(
         default="redis://:password@redis-master.db.svc.cluster.local:6379/0",
         description="Redis connection URI (redis-py asyncio compatible)",
     )
+    redis_max_connections: int = Field(
+        default=1,
+        description="Maximum connections in the async Redis connection pool",
+    )
 
 
 class APIConfig(BaseModel):
     """API configuration settings."""
+
+    cors_enabled: bool = Field(
+        default=False,
+        description="Enable permissive CORS (allow all origins). "
+        "Not needed when frontend and backend share the same origin "
+        "behind a reverse proxy; enable for local dev.",
+    )
 
     route_prefix: str = Field(
         default="chatty",

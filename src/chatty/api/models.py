@@ -26,7 +26,8 @@ class ChatRequest(BaseModel):
     """
 
     query: str = Field(
-        description="User query to process", max_length=512,
+        description="User query to process",
+        max_length=512,
     )
     conversation_id: str | None = Field(
         default=None,

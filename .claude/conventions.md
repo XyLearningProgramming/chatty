@@ -8,7 +8,7 @@
 | Framework | FastAPI | Async-first, `Annotated[X, Depends(...)]` for DI |
 | Config | pydantic-settings + YAML | Multi-source: env > .env > yaml > defaults |
 | LLM | LangChain + langchain-openai | `ChatOpenAI` as primary LLM wrapper |
-| Agent | LangChain ReAct | `create_react_agent` + `AgentExecutor` |
+| Agent | Direct tool-call loop | Native OpenAI `tools`/`tool_choice` via `astream` |
 | HTTP client | httpx | Async with `httpx.AsyncClient` |
 | HTML parsing | beautifulsoup4 | For content processors |
 | Package mgr | uv | `uv sync`, `uv add`, `uv run` |
@@ -130,17 +130,35 @@ Selection happens via `config.chat.agent_name` in YAML.
 
 ## Tools System
 
+Tools are plain Pydantic `BaseModel` subclasses (no LangChain `BaseTool`). Each tool exposes:
+
+- `to_openai_tool() -> ToolDefinition` — returns a typed OpenAI tool schema.
+- `async execute(**kwargs) -> str` — runs the tool logic.
+- `from_declaration(decl, sources, prompt) -> Self` — factory from persona config.
+
+`ToolDefinition` and `FunctionDefinition` are Pydantic models in `core/service/tools/model.py` that mirror the OpenAI function-calling JSON spec.
+
 ### Adding a new tool type
 
-1. Create a class extending `langchain.tools.BaseTool` with a `from_config(config) -> Self` classmethod and a `tool_type` class attribute.
-2. Register it in `ToolRegistry._known_tools` in `core/service/tools/registry.py`:
+1. Create a Pydantic `BaseModel` subclass implementing `to_openai_tool()`, `execute()`, and `from_declaration()`:
 
 ```python
-_known_tools: dict[str, Type[ToolBuilder]] = {
-    cls.tool_type: cls for cls in [FixedURLTool, MyNewTool]
-}
+class MyTool(BaseModel):
+    name: str
+    # ...
+
+    def to_openai_tool(self) -> ToolDefinition:
+        return ToolDefinition(function=FunctionDefinition(name=self.name, ...))
+
+    async def execute(self, **kwargs: str) -> str:
+        ...
+
+    @classmethod
+    def from_declaration(cls, declaration, sources, prompt) -> Self:
+        ...
 ```
 
+2. Wire it into `ToolRegistry._build_tools` in `core/service/tools/registry.py`.
 3. Configure it in `configs/persona.yaml`:
 
 ```yaml
@@ -234,7 +252,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 | Inject into handler | `param: Annotated[Type, Depends(get_xxx)]` |
 | Inject sub-config | `Depends(lambda: get_app_config().section)` |
 | Add a config field | Pydantic model in `system.py`/`persona.py`, wire in `AppConfig` |
-| Add a tool | `BaseTool` subclass + `tool_type` + register in `ToolRegistry._known_tools` |
+| Add a tool | Pydantic `BaseModel` with `to_openai_tool()` + `execute()` + wire in `ToolRegistry._build_tools` |
 | Add a processor | `Processor` protocol + register in `ToolRegistry._known_processors` |
 | Add a service | Subclass `ChatService`, add to `_known_agents` |
 | Run dev server | `make dev` or `uv run uvicorn chatty.app:app --reload` |

@@ -1,42 +1,24 @@
-"""Tool registry for LangGraph agents.
+"""Tool registry: builds tools from persona config and dispatches calls.
 
 Tools are built from ``persona.tools`` declarations.  Each declaration
-references sources by id.
+references knowledge sources by id.
 """
 
 import asyncio
-import functools
 import logging
 from datetime import timedelta
 from typing import Annotated
 
 from fastapi import Depends
-from langchain_core.tools import BaseTool
 
 from chatty.configs.config import AppConfig, get_app_config
-from chatty.configs.persona import (
-    KnowledgeSource,
-    ToolDeclaration,
-)
+from chatty.configs.persona import KnowledgeSource, ToolDeclaration
 from chatty.configs.system import PromptConfig
 
-from .url_tool import URLDispatcherTool
+from .model import ToolDefinition
+from .search_tool import SearchTool
 
 logger = logging.getLogger(__name__)
-
-
-def _apply_timeout(tool: BaseTool, timeout: timedelta) -> BaseTool:
-    """Wrap a tool's ``_arun`` with a per-invocation timeout."""
-    seconds = timeout.total_seconds()
-    original_arun = tool._arun
-
-    @functools.wraps(original_arun)
-    async def _timed_arun(*args, **kwargs):  # type: ignore[no-untyped-def]
-        async with asyncio.timeout(seconds):
-            return await original_arun(*args, **kwargs)
-
-    tool._arun = _timed_arun  # type: ignore[method-assign]
-    return tool
 
 
 class ToolRegistry:
@@ -50,12 +32,22 @@ class ToolRegistry:
         tool_timeout: timedelta,
     ) -> None:
         self._tools = self._build_tools(tools, sources, prompt)
-        for tool in self._tools:
-            _apply_timeout(tool, tool_timeout)
+        self._tools_by_name: dict[str, SearchTool] = {t.name: t for t in self._tools}
+        self._timeout_seconds = tool_timeout.total_seconds()
 
-    def get_tools(self) -> list[BaseTool]:
-        """Return the built tools."""
-        return list(self._tools)
+    def get_tools(self) -> list[ToolDefinition]:
+        """Return OpenAI tool definitions for all registered tools."""
+        return [t.to_tool_definition() for t in self._tools]
+
+    async def execute(self, name: str, arguments: dict[str, str]) -> str:
+        """Dispatch a tool call by name with a per-invocation timeout."""
+        tool = self._tools_by_name.get(name)
+        if tool is None:
+            valid = ", ".join(f'"{k}"' for k in self._tools_by_name)
+            logger.warning("Unknown tool %r called; registered tools: %s", name, valid)
+            return f"Error: unknown tool '{name}'. Available tools: {valid}."
+        async with asyncio.timeout(self._timeout_seconds):
+            return await tool.execute(**arguments)
 
     # ------------------------------------------------------------------
 
@@ -64,10 +56,9 @@ class ToolRegistry:
         declarations: list[ToolDeclaration],
         sources: dict[str, KnowledgeSource],
         prompt: PromptConfig,
-    ) -> list[BaseTool]:
+    ) -> list[SearchTool]:
         return [
-            URLDispatcherTool.from_declaration(decl, sources, prompt)
-            for decl in declarations
+            SearchTool.from_declaration(decl, sources, prompt) for decl in declarations
         ]
 
 

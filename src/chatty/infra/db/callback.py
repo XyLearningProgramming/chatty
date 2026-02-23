@@ -20,6 +20,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.outputs import LLMResult
 
+from .constants import ROLE_HUMAN, ROLE_SYSTEM
 from .converters import (
     ai_message_from_result,
     prompt_messages_from_event,
@@ -59,11 +60,29 @@ class PGMessageCallback(AsyncCallbackHandler):
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> None:
-        """Store the system prompt and human message on first LLM call."""
+        """Store the system prompt and human message on first LLM call.
+
+        Only the last system and last human message are persisted, so we do
+        not re-insert messages already loaded from history (which would cause
+        duplicate key errors).
+        """
         if self._initial_saved:
             return
 
-        to_add = prompt_messages_from_event(messages[0], run_id, parent_run_id)
+        all_prompt = prompt_messages_from_event(messages[0], run_id, parent_run_id)
+        last_system = next(
+            (
+                m
+                for m in reversed(all_prompt)
+                if getattr(m, "type", None) == ROLE_SYSTEM
+            ),
+            None,
+        )
+        last_human = next(
+            (m for m in reversed(all_prompt) if getattr(m, "type", None) == ROLE_HUMAN),
+            None,
+        )
+        to_add = [m for m in (last_system, last_human) if m is not None]
         if to_add:
             try:
                 await self._history.aadd_messages(to_add)

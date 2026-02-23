@@ -31,7 +31,7 @@ The system will consist of the following key components:
 | **Vector Database**   | **PostgreSQL + pgvector**                | Leverages existing provisioned infrastructure. A robust and scalable solution for vector storage and semantic search.                                                 |
 | **Caching**           | **Redis**                                | Industry-standard in-memory data store, perfect for caching frequently accessed data and reducing latency.                                                          |
 | **Model Server**      | **Qwen3 0.6B**                           | As specified in the requirements.                                                                                                                                   |
-| **Agent Framework**    | **LangGraph + langchain-core** | Prebuilt ReAct agent with native function calling and structured streaming. Replaces legacy LangChain AgentExecutor.                                                 |
+| **Agent Framework**    | **Direct tool-call loop** | Custom async loop passing OpenAI-compatible `tools`/`tool_choice="auto"` to the LLM via `astream`. No LangGraph dependency.                                          |
 | **Knowledge Ingestion**| **Python + LangChain**        | These libraries provide robust tools for document loading, chunking, and vectorization, simplifying the RAG pipeline implementation.                                 |
 
 ### 2.2. Resource Allocation
@@ -79,31 +79,36 @@ To provide a more dynamic and intelligent response, the system will use a three-
 **Pseudo-code for the Agent Pipeline:**
 
 ```python
-# Pseudo-code for the multi-agent pipeline
+# Pseudo-code for the direct tool-call loop
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-# 1. Create the LangGraph ReAct agent
-agent = create_react_agent(
-    model=llm,
-    tools=retriever_tools,
-)
+async def stream_response(llm, tools_registry, user_query: str):
+    tool_defs = [t.model_dump() for t in tools_registry.get_tools()]
+    messages = [
+        SystemMessage(content="You are a tech expert..."),
+        HumanMessage(content=user_query),
+    ]
 
-# 2. Define the full pipeline
-async def run_full_pipeline(user_query: str):
-    system_msg = SystemMessage(content="You are a tech expert...")
-    human_msg = HumanMessage(content=user_query)
+    for _round in range(MAX_TOOL_ROUNDS):
+        kwargs = {"tools": tool_defs, "tool_choice": "auto"} if tool_defs else {}
+        accumulated = None
 
-    # Stream domain events from the agent
-    async for chunk, metadata in agent.astream(
-        {"messages": [system_msg, human_msg]},
-        stream_mode="messages",
-    ):
-        # Map raw LangGraph chunks to domain events
-        event = map_chunk_to_domain_event(chunk, metadata)
-        if event:
-            yield event
+        async for chunk in llm.astream(messages, **kwargs):
+            accumulated = chunk if accumulated is None else accumulated + chunk
+            # yield ContentEvent / ThinkingEvent / ToolCallEvent(started)
+
+        if not accumulated or not accumulated.tool_calls:
+            break
+
+        messages.append(AIMessage(content=accumulated.content or "",
+                                  tool_calls=accumulated.tool_calls))
+        for tc in accumulated.tool_calls:
+            result = await tools_registry.execute(tc["name"], tc.get("args", {}))
+            messages.append(ToolMessage(content=result,
+                                        tool_call_id=tc.get("id", ""),
+                                        name=tc["name"]))
+            # yield ToolCallEvent(completed)
 ```
 
 ### 3.2. Customizable Tools for the Retriever Agent
@@ -205,13 +210,14 @@ if similar_docs and similar_docs[0][1] > 0.95: # Score represents similarity
 
 ### 3.4. Agent Framework
 
-The chatbot uses a **LangGraph prebuilt ReAct agent** (`langgraph.prebuilt.create_react_agent`) which provides:
+The chatbot uses a **direct tool-call loop** in `core/service/one_step.py`:
 
-- **Native function calling** instead of text-based ReAct parsing.
-- **Structured streaming** via `.astream(stream_mode="messages")` yielding `(BaseMessageChunk, metadata)` tuples.
-- **System prompt as plain text** — persona description only, no template boilerplate.
+- **Native OpenAI tool calling** — passes `tools` (list of `ToolDefinition` schemas) and `tool_choice="auto"` as kwargs to `llm.astream()`.
+- **Single-pass streaming** — each `AIMessageChunk` is simultaneously accumulated (for tool-call detection) and mapped to domain `StreamEvent`s (content, thinking, tool_call) yielded to the client.
+- **Tool execution loop** — when tool calls are detected, they are dispatched via `ToolRegistry.execute()`, results appended as `ToolMessage`s, and the LLM is called again (up to `_MAX_TOOL_ROUNDS`).
+- **No LangGraph dependency** — the agent loop is a simple `async for` over `astream`, with no external agent framework.
 
-A lightweight **async stream mapper** (`core/service/stream.py`) transforms LangGraph's raw message chunks into clean domain events before they reach the API layer.
+Upstream (e.g. slm-server) emits reasoning as `delta.reasoning_content` and full `delta.tool_calls`; `core/service/stream.py` maps these chunk fields to domain events (ThinkingEvent, ContentEvent, ToolCallEvent).
 
 ### 3.5. API Design
 
@@ -322,14 +328,14 @@ src/
     │   │   └── dependency.py # ChatOpenAI factory
     │   └── service/
     │       ├── models.py     # Domain StreamEvent schema + ChatService ABC
-    │       ├── stream.py     # Async mapper: LangGraph messages → domain events
-    │       ├── one_step.py   # LangGraph prebuilt ReAct agent service
+    │       ├── stream.py     # map_llm_stream (chunk → StreamEvent pass-through)
+    │       ├── one_step.py   # Direct tool-call loop chat service
     │       ├── prompt.py     # System prompt template
     │       ├── dependency.py # ChatService factory / DI
     │       └── tools/
-    │           ├── model.py      # ToolBuilder protocol
-    │           ├── registry.py   # Tool registry
-    │           ├── url_tool.py   # URL fetching tool
+    │           ├── model.py      # ToolDefinition/FunctionDefinition Pydantic models + ToolBuilder protocol
+    │           ├── registry.py   # Tool registry with get_tools() and execute() dispatch
+    │           ├── search_tool.py # SearchTool — fetches content from configured knowledge sources
     │           └── processors.py # Content processors
     ├── configs/
     │   ├── config.py         # AppConfig (pydantic-settings)

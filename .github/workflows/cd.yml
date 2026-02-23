@@ -11,6 +11,7 @@ env:
   IMAGE_REPOSITORY: ${{ secrets.IMAGE_NAME }}
   IMAGE_TAG: ${{ github.sha }}
   NAMESPACE: backend
+  TARGET_NODE: active-nerd-2
 
 jobs:
   deploy:
@@ -43,3 +44,4 @@ jobs:
           chatty_env: ${{ secrets.CHATTY_ENV }}
           namespace: ${{ env.NAMESPACE }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          target_node: ${{ env.TARGET_NODE }}

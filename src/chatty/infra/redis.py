@@ -22,7 +22,11 @@ async def build_redis(
     config: Annotated[AppConfig, Depends(get_app_config)],
 ) -> AsyncGenerator[Redis | None, None]:
     """Create a Redis client; yield ``None`` if unreachable."""
-    client = Redis.from_url(config.third_party.redis_uri, decode_responses=True)
+    client = Redis.from_url(
+        config.third_party.redis_uri,
+        decode_responses=True,
+        max_connections=config.third_party.redis_max_connections,
+    )
     verified: Redis | None = None
     try:
         await client.ping()

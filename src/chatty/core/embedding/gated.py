@@ -54,9 +54,9 @@ class GatedEmbedModel:
         Input is truncated to ``max_input_tokens`` before the API call.
         """
         text = truncate_to_tokens(text, self._config.max_input_tokens)
-        EMBEDDING_INPUT_TOKENS.labels(
-            model_name=self._config.model_name
-        ).observe(estimate_tokens(text))
+        EMBEDDING_INPUT_TOKENS.labels(model_name=self._config.model_name).observe(
+            estimate_tokens(text)
+        )
         with tracer.start_as_current_span(SPAN_EMBEDDING_EMBED) as span:
             span.set_attribute(ATTR_EMBEDDING_MODEL, self._config.model_name)
             span.set_attribute(ATTR_EMBEDDING_TEXT_LEN, len(text))

@@ -1,26 +1,20 @@
-"""Unit tests for KnowledgeSource, URLDispatcherTool, and ToolRegistry."""
+"""Unit tests for KnowledgeSource, SearchTool, and ToolRegistry."""
 
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from chatty.configs.persona import (
-    EmbedDeclaration,
-    KnowledgeSource,
-    PersonaConfig,
-    ProcessorWithArgs,
-    ToolDeclaration,
-)
+from chatty.configs.persona import (EmbedDeclaration, KnowledgeSource,
+                                    PersonaConfig, ProcessorWithArgs,
+                                    ToolDeclaration)
 from chatty.configs.system import PromptConfig
+from chatty.core.service.tools.model import ToolDefinition
 from chatty.core.service.tools.registry import ToolRegistry
-from chatty.core.service.tools.url_tool import URLDispatcherTool
+from chatty.core.service.tools.search_tool import SearchTool
 from chatty.infra.http_utils import PDF_CONTENT_TYPES, extract_text_from_pdf
-from chatty.infra.processor_utils import (
-    HtmlHeadTitleMeta,
-    TruncateProcessor,
-    get_processor,
-)
+from chatty.infra.processor_utils import (HtmlHeadTitleMeta, TruncateProcessor,
+                                          get_processor)
 
 _TEST_TOOL_TIMEOUT = timedelta(seconds=60)
 
@@ -184,12 +178,12 @@ class TestProcessors:
 
 
 # ---------------------------------------------------------------------------
-# URLDispatcherTool.from_declaration
+# SearchTool.from_declaration
 # ---------------------------------------------------------------------------
 
 
-class TestURLDispatcherFromDeclaration:
-    """Test building the dispatcher from declarations."""
+class TestSearchToolFromDeclaration:
+    """Test building the search tool from declarations."""
 
     def _make_sources(self):
         return {
@@ -210,12 +204,9 @@ class TestURLDispatcherFromDeclaration:
             type="url_dispatcher",
             sources=["homepage", "resume"],
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
         assert tool.name == "lookup"
-        assert set(tool.sources.keys()) == {
-            "homepage",
-            "resume",
-        }
+        assert set(tool.sources.keys()) == {"homepage", "resume"}
         assert tool.sources["homepage"].content_url == "https://example.com"
         assert tool.sources["resume"].content_url == "https://example.com/resume"
 
@@ -226,7 +217,7 @@ class TestURLDispatcherFromDeclaration:
             type="url_dispatcher",
             sources=["homepage"],
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
         assert set(tool.sources.keys()) == {"homepage"}
 
     def test_custom_timeout(self):
@@ -242,7 +233,7 @@ class TestURLDispatcherFromDeclaration:
             type="url_dispatcher",
             sources=["resume"],
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
         assert tool.sources["resume"].timeout == timedelta(seconds=5)
 
     def test_from_declaration_returns_correct_type(self):
@@ -252,8 +243,8 @@ class TestURLDispatcherFromDeclaration:
             type="url_dispatcher",
             sources=["homepage"],
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
-        assert isinstance(tool, URLDispatcherTool)
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
+        assert isinstance(tool, SearchTool)
 
     def test_action_processors_from_declaration(self):
         sources = self._make_sources()
@@ -263,11 +254,11 @@ class TestURLDispatcherFromDeclaration:
             sources=["homepage", "resume"],
             processors=[ProcessorWithArgs(name="truncate", max_length=5000)],
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
         assert len(tool.action_processors) == 1
         assert isinstance(tool.action_processors[0], TruncateProcessor)
 
-    def test_args_schema_has_enum_and_descriptions(self):
+    def test_to_openai_tool_has_enum_and_descriptions(self):
         sources = {
             "homepage": KnowledgeSource(
                 description="Personal website meta info",
@@ -283,17 +274,19 @@ class TestURLDispatcherFromDeclaration:
             type="url_dispatcher",
             sources=["homepage", "resume"],
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
-        schema = tool.args_schema.model_json_schema()
-        source_schema = schema["properties"]["source"]
-        assert set(source_schema["enum"]) == {
-            "homepage",
-            "resume",
-        }
-        assert '"homepage"' in source_schema["description"]
-        assert '"resume"' in source_schema["description"]
-        assert "Personal website meta info" in source_schema["description"]
-        assert "Full resume PDF content" in source_schema["description"]
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
+        td = tool.to_tool_definition()
+
+        assert isinstance(td, ToolDefinition)
+        assert td.type == "function"
+        assert td.function.name == "lookup"
+
+        source_param = td.function.parameters.properties["source"]
+        assert set(source_param.enum) == {"homepage", "resume"}
+        assert '"homepage"' in source_param.description
+        assert '"resume"' in source_param.description
+        assert "Personal website meta info" in source_param.description
+        assert "Full resume PDF content" in source_param.description
 
     def test_declaration_description_used(self):
         sources = self._make_sources()
@@ -303,7 +296,7 @@ class TestURLDispatcherFromDeclaration:
             sources=["homepage"],
             description="Custom tool description",
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
         assert tool.description == "Custom tool description"
 
     def test_fallback_description_from_prompt(self):
@@ -313,12 +306,12 @@ class TestURLDispatcherFromDeclaration:
             type="url_dispatcher",
             sources=["homepage"],
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
         assert tool.description == "Default tool description"
 
 
 # ---------------------------------------------------------------------------
-# URLDispatcherTool._arun (async, mocked HTTP)
+# SearchTool.execute (async, mocked HTTP)
 # ---------------------------------------------------------------------------
 
 
@@ -340,14 +333,14 @@ def _pdf_response(pdf_bytes: bytes, status_code: int = 200) -> AsyncMock:
     return resp
 
 
-class TestURLDispatcherArun:
+class TestSearchToolExecute:
     """Test async fetch dispatch with mocked httpx."""
 
     def _make_tool(self, sources, decl):
-        return URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        return SearchTool.from_declaration(decl, sources, _prompt())
 
     @pytest.mark.asyncio
-    async def test_arun_dispatches_by_name(self):
+    async def test_execute_dispatches_by_name(self):
         sources = {
             "homepage": KnowledgeSource(
                 description="d",
@@ -369,12 +362,12 @@ class TestURLDispatcherArun:
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await tool._arun(source="homepage")
+            result = await tool.execute(source="homepage")
             mock_client.get.assert_called_once_with("https://example.com")
             assert "<html>" in result
 
     @pytest.mark.asyncio
-    async def test_arun_with_action_truncate(self):
+    async def test_execute_with_action_truncate(self):
         sources = {
             "big": KnowledgeSource(
                 description="d",
@@ -387,7 +380,7 @@ class TestURLDispatcherArun:
             sources=["big"],
             processors=[ProcessorWithArgs(name="truncate", max_length=10)],
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
 
         mock_response = _html_response("x" * 100)
 
@@ -397,12 +390,12 @@ class TestURLDispatcherArun:
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await tool._arun(source="big")
+            result = await tool.execute(source="big")
             assert len(result) == 13  # 10 chars + "..."
             assert result.endswith("...")
 
     @pytest.mark.asyncio
-    async def test_arun_unknown_name_returns_error_message(self):
+    async def test_execute_unknown_name_returns_error_message(self):
         sources = {
             "homepage": KnowledgeSource(
                 description="d",
@@ -415,14 +408,12 @@ class TestURLDispatcherArun:
             sources=["homepage"],
         )
         tool = self._make_tool(sources, decl)
-        result = await tool._arun(source="nonexistent")
+        result = await tool.execute(source="nonexistent")
         assert "Unknown source" in result
         assert "homepage" in result
 
     @pytest.mark.asyncio
-    async def test_arun_applies_source_and_action_processors(
-        self,
-    ):
+    async def test_execute_applies_source_and_action_processors(self):
         """Both source-level and action-level processors run."""
         sources = {
             "site": KnowledgeSource(
@@ -437,7 +428,7 @@ class TestURLDispatcherArun:
             sources=["site"],
             processors=[ProcessorWithArgs(name="truncate", max_length=50)],
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
 
         html = (
             "<html><head><title>My Site</title>"
@@ -452,17 +443,17 @@ class TestURLDispatcherArun:
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await tool._arun(source="site")
+            result = await tool.execute(source="site")
             assert "My Site" in result
             assert len(result) <= 53  # 50 + "..."
 
 
 # ---------------------------------------------------------------------------
-# URLDispatcherTool -- PDF handling
+# SearchTool -- PDF handling
 # ---------------------------------------------------------------------------
 
 
-class TestURLDispatcherPdf:
+class TestSearchToolPdf:
     """Test that PDF responses are automatically converted to text."""
 
     @staticmethod
@@ -492,7 +483,7 @@ class TestURLDispatcherPdf:
         assert "Resume content here" in text
 
     @pytest.mark.asyncio
-    async def test_arun_extracts_pdf_text(self):
+    async def test_execute_extracts_pdf_text(self):
         pdf_bytes = self._make_simple_pdf("Software Engineer")
         sources = {
             "resume": KnowledgeSource(
@@ -505,7 +496,7 @@ class TestURLDispatcherPdf:
             type="url_dispatcher",
             sources=["resume"],
         )
-        tool = URLDispatcherTool.from_declaration(decl, sources, _prompt())
+        tool = SearchTool.from_declaration(decl, sources, _prompt())
 
         mock_response = _pdf_response(pdf_bytes)
 
@@ -515,7 +506,7 @@ class TestURLDispatcherPdf:
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await tool._arun(source="resume")
+            result = await tool.execute(source="resume")
             assert "Software Engineer" in result
 
 
@@ -525,7 +516,7 @@ class TestURLDispatcherPdf:
 
 
 class TestToolRegistry:
-    """Test registry: building, error handling, and caching."""
+    """Test registry: building, tool definitions, and execution."""
 
     def _make_registry(self, sources, tools):
         return ToolRegistry(
@@ -535,7 +526,7 @@ class TestToolRegistry:
             tool_timeout=_TEST_TOOL_TIMEOUT,
         )
 
-    def test_creates_dispatcher_from_declarations(self):
+    def test_get_tools_returns_tool_definitions(self):
         sources = {
             "homepage": KnowledgeSource(
                 description="Get homepage",
@@ -556,13 +547,14 @@ class TestToolRegistry:
         registry = self._make_registry(sources, tools)
         result = registry.get_tools()
         assert len(result) == 1
-        assert result[0].name == "lookup"
+        assert isinstance(result[0], ToolDefinition)
+        assert result[0].function.name == "lookup"
 
     def test_empty_tools(self):
         registry = self._make_registry({}, [])
         assert registry.get_tools() == []
 
-    def test_all_declarations_become_url_dispatcher(self):
+    def test_tool_definition_structure(self):
         sources = {
             "s": KnowledgeSource(
                 description="d",
@@ -579,7 +571,10 @@ class TestToolRegistry:
         registry = self._make_registry(sources, tools)
         result = registry.get_tools()
         assert len(result) == 1
-        assert isinstance(result[0], URLDispatcherTool)
+        td = result[0]
+        assert td.type == "function"
+        assert td.function.name == "t"
+        assert "source" in td.function.parameters.properties
 
     def test_unknown_action_processor_raises(self):
         sources = {
@@ -598,7 +593,7 @@ class TestToolRegistry:
         with pytest.raises(NotImplementedError, match="does_not_exist"):
             self._make_registry(sources, tools)
 
-    def test_get_tools_returns_copy(self):
+    def test_get_tools_returns_fresh_list(self):
         sources = {
             "s": KnowledgeSource(
                 description="d",
@@ -615,28 +610,37 @@ class TestToolRegistry:
         registry = self._make_registry(sources, tools)
         tools1 = registry.get_tools()
         tools2 = registry.get_tools()
-        assert tools1 == tools2
         assert tools1 is not tools2
 
-    def test_action_processors_stored_on_tool(self):
+    @pytest.mark.asyncio
+    async def test_execute_dispatches_to_tool(self):
         sources = {
-            "site": KnowledgeSource(
+            "homepage": KnowledgeSource(
                 description="d",
-                content_url="http://x",
+                content_url="https://example.com",
             ),
         }
         tools = [
             ToolDeclaration(
                 name="lookup",
                 type="url_dispatcher",
-                sources=["site"],
-                processors=[ProcessorWithArgs(name="truncate", max_length=5000)],
+                sources=["homepage"],
             ),
         ]
         registry = self._make_registry(sources, tools)
-        result = registry.get_tools()
-        assert len(result) == 1
-        dispatcher = result[0]
-        assert isinstance(dispatcher, URLDispatcherTool)
-        assert len(dispatcher.action_processors) == 1
-        assert isinstance(dispatcher.action_processors[0], TruncateProcessor)
+
+        mock_response = _html_response("<html>hi</html>")
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.get.return_value = mock_response
+            MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            result = await registry.execute("lookup", {"source": "homepage"})
+            assert "<html>" in result
+
+    @pytest.mark.asyncio
+    async def test_execute_unknown_tool_returns_error(self):
+        registry = self._make_registry({}, [])
+        result = await registry.execute("nonexistent", {"source": "x"})
+        assert "unknown tool" in result.lower()

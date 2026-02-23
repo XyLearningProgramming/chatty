@@ -1,5 +1,5 @@
 
-.PHONY: help install test test-unit test-e2e test-golden lint format typecheck check dev cli db-upgrade clean
+.PHONY: help install test test-unit test-e2e test-golden lint format typecheck check dev cli db-upgrade dev-up clean
 
 # Project root (directory containing this Makefile). Ensures .env is loaded from repo root
 # even when make is invoked from a subdirectory.
@@ -20,6 +20,7 @@ help:
 	@echo "  dev         - Start development server with reload"
 	@echo "  cli         - Start interactive CLI (cli/)"
 	@echo "  db-upgrade  - Run Alembic migrations to head"
+	@echo "  dev-up      - Start dev stack (deploy/docker/docker-compose.dev.yaml) in detached mode"
 	@echo "  clean       - Clean up generated files"
 
 # Installation
@@ -42,7 +43,8 @@ test-golden:
 lint:
 	uv run ruff check src/
 
-format:
+format: ## Run ruff linter (--fix) and formatter
+	uv run ruff check src/ --fix
 	uv run ruff format src/
 
 typecheck:
@@ -55,11 +57,15 @@ dev:
 	uv run --env-file $(ROOT).env uvicorn chatty.app:app --host 0.0.0.0 --port 8080 --reload
 
 cli:
-	cd $(ROOT) && uv run --env-file $(ROOT).env python -m cli
+	cd $(ROOT) && uv run --env-file $(ROOT).env python -m cli --show-thinking
 
 # Database
 db-upgrade:
 	uv run --env-file $(ROOT).env alembic upgrade head
+
+# Docker dev stack
+dev-up:
+	docker compose -f $(ROOT)deploy/docker/docker-compose.dev.yaml up -d
 
 # Cleanup
 clean:
