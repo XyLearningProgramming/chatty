@@ -640,7 +640,7 @@ class TestToolRegistry:
             assert "<html>" in result
 
     @pytest.mark.asyncio
-    async def test_execute_unknown_tool_raises(self):
+    async def test_execute_unknown_tool_returns_error(self):
         registry = self._make_registry({}, [])
-        with pytest.raises(KeyError):
-            await registry.execute("nonexistent", {"source": "x"})
+        result = await registry.execute("nonexistent", {"source": "x"})
+        assert "unknown tool" in result.lower()
