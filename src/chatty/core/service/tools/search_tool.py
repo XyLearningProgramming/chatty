@@ -17,11 +17,19 @@ from pydantic import BaseModel, PrivateAttr
 from chatty.configs.persona import KnowledgeSource, ToolDeclaration
 from chatty.configs.system import PromptConfig
 from chatty.infra.http_utils import HttpClient
-from chatty.infra.telemetry import (ATTR_TOOL_ERROR, ATTR_TOOL_SOURCE,
-                                    SPAN_TOOL_URL_DISPATCHER, tracer)
+from chatty.infra.telemetry import (
+    ATTR_TOOL_ERROR,
+    ATTR_TOOL_SOURCE,
+    SPAN_TOOL_URL_DISPATCHER,
+    tracer,
+)
 
-from .model import (FunctionDefinition, ParametersDefinition,
-                    PropertyDefinition, ToolDefinition)
+from .model import (
+    FunctionDefinition,
+    ParametersDefinition,
+    PropertyDefinition,
+    ToolDefinition,
+)
 
 logger = logging.getLogger(__name__)
 
