@@ -25,7 +25,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
-from pydantic import ConfigDict, Field
+from pydantic import PrivateAttr
 
 from chatty.core.service.metrics import (
     LLM_CALLS_IN_FLIGHT,
@@ -55,12 +55,14 @@ class GatedChatModel(BaseChatModel):
     """
 
     inner: BaseChatModel
-    semaphore: ModelSemaphore = Field(exclude=True)
     model_name: str
     max_tokens: int
     context_window: int
+    _semaphore: ModelSemaphore = PrivateAttr()
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    def __init__(self, *, semaphore: ModelSemaphore, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._semaphore = semaphore
 
     # ------------------------------------------------------------------
     # Token-budget message trimming
@@ -175,7 +177,7 @@ class GatedChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         messages = self._trim_messages(messages)
-        async with self.semaphore.slot():
+        async with self._semaphore.slot():
             LLM_CALLS_IN_FLIGHT.labels(model_name=self.model_name).inc()
             try:
                 return await self.inner._agenerate(
@@ -192,7 +194,7 @@ class GatedChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         messages = self._trim_messages(messages)
-        async with self.semaphore.slot():
+        async with self._semaphore.slot():
             LLM_CALLS_IN_FLIGHT.labels(model_name=self.model_name).inc()
             try:
                 async for chunk in self.inner._astream(

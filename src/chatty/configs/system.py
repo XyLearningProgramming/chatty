@@ -34,6 +34,13 @@ class ThirdPartyConfig(BaseModel):
 class APIConfig(BaseModel):
     """API configuration settings."""
 
+    cors_enabled: bool = Field(
+        default=False,
+        description="Enable permissive CORS (allow all origins). "
+        "Not needed when frontend and backend share the same origin "
+        "behind a reverse proxy; enable for local dev.",
+    )
+
     route_prefix: str = Field(
         default="chatty",
         description="Service prefix inserted between /api/v1 and route names. "

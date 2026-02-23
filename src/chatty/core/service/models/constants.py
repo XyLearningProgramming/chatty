@@ -33,10 +33,3 @@ VALID_TOOL_STATUSES = frozenset(
     }
 )
 
-# ---------------------------------------------------------------------------
-# LangGraph constants — avoid magic strings in graph execution
-# ---------------------------------------------------------------------------
-
-LANGGRAPH_INPUT_KEY_MESSAGES = "messages"
-LANGGRAPH_STREAM_MODE_MESSAGES = "messages"
-LANGGRAPH_CONFIG_KEY_CALLBACKS = "callbacks"

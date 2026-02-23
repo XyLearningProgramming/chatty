@@ -108,7 +108,7 @@ class ToolExtra(_ExtraBase):
 MessageExtra = PromptExtra | AIExtra | ToolExtra
 
 
-EMBEDDING_DIMENSIONS = 1024
+EMBEDDING_DIMENSIONS = 384
 """Must match ``EmbeddingConfig.dimensions`` in ``configs/system.py``.
 Changing this value requires an alembic migration to ALTER the
 ``Vector()`` columns in the database."""

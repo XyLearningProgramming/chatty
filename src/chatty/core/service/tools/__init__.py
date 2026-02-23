@@ -1,1 +1,1 @@
-"""Tools module with modern registry system."""
+"""Tools module with search tool and registry."""

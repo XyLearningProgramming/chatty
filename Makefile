@@ -1,5 +1,5 @@
 
-.PHONY: help install test test-unit test-e2e test-golden lint format typecheck check dev cli db-upgrade clean
+.PHONY: help install test test-unit test-e2e test-golden lint format typecheck check dev cli db-upgrade dev-up clean
 
 # Project root (directory containing this Makefile). Ensures .env is loaded from repo root
 # even when make is invoked from a subdirectory.
@@ -20,6 +20,7 @@ help:
 	@echo "  dev         - Start development server with reload"
 	@echo "  cli         - Start interactive CLI (cli/)"
 	@echo "  db-upgrade  - Run Alembic migrations to head"
+	@echo "  dev-up      - Start dev stack (deploy/docker/docker-compose.dev.yaml) in detached mode"
 	@echo "  clean       - Clean up generated files"
 
 # Installation
@@ -60,6 +61,10 @@ cli:
 # Database
 db-upgrade:
 	uv run --env-file $(ROOT).env alembic upgrade head
+
+# Docker dev stack
+dev-up:
+	docker compose -f $(ROOT)deploy/docker/docker-compose.dev.yaml up -d
 
 # Cleanup
 clean:

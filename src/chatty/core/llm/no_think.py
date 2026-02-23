@@ -17,8 +17,9 @@ from langchain_core.callbacks import (
     CallbackManagerForLLMRun,
 )
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from langchain_core.runnables import Runnable
 
 _DEFAULT_SUFFIX = " /no_think"
 
@@ -93,3 +94,22 @@ class QwenNoThinkChatModel(BaseChatModel):
             self._inject(messages), stop, run_manager, **kwargs
         ):
             yield chunk
+
+    # ------------------------------------------------------------------
+    # Delegation
+    # ------------------------------------------------------------------
+
+    def bind_tools(
+        self,
+        tools: Any,
+        **kwargs: Any,
+    ) -> Runnable[Any, AIMessage]:
+        """Format tools via the inner model, then bind to *self*.
+
+        Same pattern as ``GatedChatModel.bind_tools``: the inner model
+        formats the tool definitions, and re-binding those kwargs onto
+        *self* ensures subsequent calls still route through the
+        no-think injection.
+        """
+        inner_bound = self.inner.bind_tools(tools, **kwargs)
+        return self.bind(**inner_bound.kwargs)

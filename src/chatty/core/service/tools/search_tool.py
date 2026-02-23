@@ -1,17 +1,18 @@
-"""URL dispatcher tool: the model sees a single ``lookup`` tool.
+"""Search tool: the model sees a single tool whose ``source`` argument
+selects from a set of knowledge sources.
 
-The model picks a *source* (e.g. ``"resume"``, ``"current_homepage"``)
-and the dispatcher fetches, post-processes, and returns plain text.
-URLs and processing details are never exposed to the model.
+The model picks a *source* key (e.g. ``"resume"``, ``"current_homepage"``)
+and the tool internally resolves it to a URL, fetches content,
+post-processes, and returns plain text.  URLs and processing details are
+never exposed to the model.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Self, Type
+from typing import Any, Self
 
-from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr, create_model
+from pydantic import BaseModel, PrivateAttr
 
 from chatty.configs.persona import KnowledgeSource, ToolDeclaration
 from chatty.configs.system import PromptConfig
@@ -23,13 +24,22 @@ from chatty.infra.telemetry import (
     tracer,
 )
 
+from .model import (
+    FunctionDefinition,
+    ParametersDefinition,
+    PropertyDefinition,
+    ToolDefinition,
+)
+
 logger = logging.getLogger(__name__)
 
-_SCHEMA_NAME = "LookupInput"
+PARAM_SOURCE = "source"
+_JSON_SCHEMA_TYPE_STRING = "string"
+_ERR_INVALID_SOURCE = "invalid_source"
 
 
-class URLDispatcherTool(BaseTool):
-    """Single ``lookup`` tool exposed to the model.
+class SearchTool(BaseModel):
+    """Single tool exposed to the LLM.
 
     The model sees one tool with a ``source`` argument whose allowed
     values are built dynamically from YAML config.  Internally each
@@ -37,26 +47,51 @@ class URLDispatcherTool(BaseTool):
     processing via ``get_content()``.
     """
 
-    sources: dict[str, KnowledgeSource] = Field(default_factory=dict)
-    action_processors: list[Any] = Field(default_factory=list)
+    name: str
+    description: str
+    sources: dict[str, KnowledgeSource] = {}
+    source_descriptions: dict[str, str] = {}
+    action_processors: list[Any] = []
     _prompt: PromptConfig = PrivateAttr()
 
     def __init__(self, *, prompt: PromptConfig, **data: Any) -> None:
         super().__init__(**data)
         self._prompt = prompt
 
-    # ---- LangChain interface ---------------------------------------------
+    # ---- OpenAI tool definition ------------------------------------------
 
-    def _run(self, source: str) -> str:
-        raise NotImplementedError("Use async — call via _arun")
+    def to_tool_definition(self) -> ToolDefinition:
+        """Return a typed OpenAI-compatible tool definition."""
+        source_desc = self._prompt.render_tool_source_field(
+            self.source_descriptions,
+        )
+        return ToolDefinition(
+            function=FunctionDefinition(
+                name=self.name,
+                description=self.description,
+                parameters=ParametersDefinition(
+                    properties={
+                        PARAM_SOURCE: PropertyDefinition(
+                            type=_JSON_SCHEMA_TYPE_STRING,
+                            description=source_desc,
+                            enum=list(self.sources.keys()),
+                        ),
+                    },
+                    required=[PARAM_SOURCE],
+                ),
+            ),
+        )
 
-    async def _arun(self, source: str) -> str:
+    # ---- Execution -------------------------------------------------------
+
+    async def execute(self, *, source: str) -> str:
+        """Resolve *source* key to a knowledge source, fetch, and return text."""
         with tracer.start_as_current_span(SPAN_TOOL_URL_DISPATCHER) as span:
             span.set_attribute(ATTR_TOOL_SOURCE, source)
             logger.debug("Tool dispatch: source=%s", source)
             src = self.sources.get(source)
             if src is None:
-                span.set_attribute(ATTR_TOOL_ERROR, "invalid_source")
+                span.set_attribute(ATTR_TOOL_ERROR, _ERR_INVALID_SOURCE)
                 valid = ", ".join(f'"{k}"' for k in self.sources)
                 return self._prompt.render_tool_error(source=source, valid=valid)
             return await src.get_content(
@@ -73,7 +108,7 @@ class URLDispatcherTool(BaseTool):
         sources: dict[str, KnowledgeSource],
         prompt: PromptConfig,
     ) -> Self:
-        """Build one dispatcher from a ``ToolDeclaration``."""
+        """Build one search tool from a ``ToolDeclaration``."""
         tool_sources = {sid: sources[sid] for sid in declaration.sources}
 
         descriptions: dict[str, str] = {}
@@ -83,33 +118,11 @@ class URLDispatcherTool(BaseTool):
                 desc = prompt.render_tool_source_hint(source_id=sid)
             descriptions[sid] = desc
 
-        schema = _build_args_schema(
-            prompt.render_tool_source_field(descriptions),
-            list(descriptions),
-        )
-
         return cls(
             name=declaration.name,
             description=declaration.description or prompt.tool_description,
             sources=tool_sources,
+            source_descriptions=descriptions,
             action_processors=declaration.get_processors(),
-            args_schema=schema,
             prompt=prompt,
         )
-
-
-def _build_args_schema(
-    source_description: str,
-    source_keys: list[str],
-) -> Type[BaseModel]:
-    """Build a dynamic Pydantic model for the ``source`` argument."""
-    return create_model(
-        _SCHEMA_NAME,
-        source=(
-            str,
-            Field(
-                description=source_description,
-                json_schema_extra={"enum": source_keys},
-            ),
-        ),
-    )

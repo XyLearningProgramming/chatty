@@ -13,22 +13,13 @@ from langchain_core.messages import BaseMessage
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from chatty.infra.telemetry import (
-    ATTR_HISTORY_CONVERSATION_ID,
-    ATTR_HISTORY_MESSAGE_COUNT,
-    SPAN_HISTORY_LOAD,
-    tracer,
-)
+from chatty.infra.telemetry import (ATTR_HISTORY_CONVERSATION_ID,
+                                    ATTR_HISTORY_MESSAGE_COUNT,
+                                    SPAN_HISTORY_LOAD, tracer)
 
-from .constants import (
-    DEFAULT_MAX_MESSAGES,
-    PARAM_CID,
-    PARAM_LIM,
-    PARAM_SYSTEM_ROLE,
-    ROLE_SYSTEM,
-    SQL_DELETE_MESSAGES,
-    SQL_SELECT_MESSAGES,
-)
+from .constants import (DEFAULT_MAX_MESSAGES, PARAM_CID, PARAM_LIM,
+                        PARAM_SYSTEM_ROLE, ROLE_SYSTEM, SQL_DELETE_MESSAGES,
+                        SQL_SELECT_MESSAGES)
 from .converters import message_to_chat_message, row_to_message
 
 logger = logging.getLogger(__name__)
