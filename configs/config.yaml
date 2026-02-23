@@ -111,7 +111,7 @@ persona:
       description: >
         Full resume / CV with professional background, skills,
         and experience.
-      content_url: "https://x3huang.dev/resume/20250703.pdf"
+      content_url: "https://x3huang.dev/resume/20260111.pdf"
       timeout: "PT30S"
       cache_ttl: "PT6H"
       processors:

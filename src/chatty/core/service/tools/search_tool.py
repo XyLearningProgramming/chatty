@@ -17,19 +17,11 @@ from pydantic import BaseModel, PrivateAttr
 from chatty.configs.persona import KnowledgeSource, ToolDeclaration
 from chatty.configs.system import PromptConfig
 from chatty.infra.http_utils import HttpClient
-from chatty.infra.telemetry import (
-    ATTR_TOOL_ERROR,
-    ATTR_TOOL_SOURCE,
-    SPAN_TOOL_URL_DISPATCHER,
-    tracer,
-)
+from chatty.infra.telemetry import (ATTR_TOOL_ERROR, ATTR_TOOL_SOURCE,
+                                    SPAN_TOOL_URL_DISPATCHER, tracer)
 
-from .model import (
-    FunctionDefinition,
-    ParametersDefinition,
-    PropertyDefinition,
-    ToolDefinition,
-)
+from .model import (FunctionDefinition, ParametersDefinition,
+                    PropertyDefinition, ToolDefinition)
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +76,10 @@ class SearchTool(BaseModel):
 
     # ---- Execution -------------------------------------------------------
 
-    async def execute(self, *, source: str) -> str:
+    async def execute(self, source: str, *args: Any, **kwargs: Any) -> str:
         """Resolve *source* key to a knowledge source, fetch, and return text."""
+        if args or kwargs:
+            logger.warning("Ignoring unexpected tool arguments: %s", args or kwargs)
         with tracer.start_as_current_span(SPAN_TOOL_URL_DISPATCHER) as span:
             span.set_attribute(ATTR_TOOL_SOURCE, source)
             logger.debug("Tool dispatch: source=%s", source)

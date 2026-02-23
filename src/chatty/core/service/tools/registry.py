@@ -40,11 +40,12 @@ class ToolRegistry:
         return [t.to_tool_definition() for t in self._tools]
 
     async def execute(self, name: str, arguments: dict[str, str]) -> str:
-        """Dispatch a tool call by name with a per-invocation timeout.
-
-        Raises ``KeyError`` if *name* is not a registered tool.
-        """
-        tool = self._tools_by_name[name]
+        """Dispatch a tool call by name with a per-invocation timeout."""
+        tool = self._tools_by_name.get(name)
+        if tool is None:
+            valid = ", ".join(f'"{k}"' for k in self._tools_by_name)
+            logger.warning("Unknown tool %r called; registered tools: %s", name, valid)
+            return f"Error: unknown tool '{name}'. Available tools: {valid}."
         async with asyncio.timeout(self._timeout_seconds):
             return await tool.execute(**arguments)
 
