@@ -71,7 +71,11 @@ class PGMessageCallback(AsyncCallbackHandler):
 
         all_prompt = prompt_messages_from_event(messages[0], run_id, parent_run_id)
         last_system = next(
-            (m for m in reversed(all_prompt) if getattr(m, "type", None) == ROLE_SYSTEM),
+            (
+                m
+                for m in reversed(all_prompt)
+                if getattr(m, "type", None) == ROLE_SYSTEM
+            ),
             None,
         )
         last_human = next(

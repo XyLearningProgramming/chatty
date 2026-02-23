@@ -32,9 +32,7 @@ class ToolRegistry:
         tool_timeout: timedelta,
     ) -> None:
         self._tools = self._build_tools(tools, sources, prompt)
-        self._tools_by_name: dict[str, SearchTool] = {
-            t.name: t for t in self._tools
-        }
+        self._tools_by_name: dict[str, SearchTool] = {t.name: t for t in self._tools}
         self._timeout_seconds = tool_timeout.total_seconds()
 
     def get_tools(self) -> list[ToolDefinition]:
@@ -59,8 +57,7 @@ class ToolRegistry:
         prompt: PromptConfig,
     ) -> list[SearchTool]:
         return [
-            SearchTool.from_declaration(decl, sources, prompt)
-            for decl in declarations
+            SearchTool.from_declaration(decl, sources, prompt) for decl in declarations
         ]
 
 

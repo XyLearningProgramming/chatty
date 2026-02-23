@@ -48,7 +48,7 @@ def normalize_tool_call(tc: dict[str, Any]) -> dict[str, Any] | None:
 
 
 class StreamAccumulator(BaseModel):
-    """Filled by :func:`map_llm_stream` with the accumulated message (for tool_calls)."""
+    """Filled by :func:`map_llm_stream` with the accumulated message (tool_calls)."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -65,7 +65,7 @@ def _reasoning_from_chunk(chunk: AIMessageChunk) -> str | None:
 
 
 def chunk_to_thinking_and_content(chunk: AIMessageChunk) -> Iterator[StreamEvent]:
-    """Yield only ThinkingEvent and ContentEvent for a chunk (e.g. RAG; no tool calls)."""
+    """Yield ThinkingEvent and ContentEvent for a chunk (e.g. RAG; no tool calls)."""
     reasoning = _reasoning_from_chunk(chunk)
     if reasoning:
         yield ThinkingEvent(content=reasoning)
@@ -77,7 +77,8 @@ async def map_llm_stream(
     chunks: AsyncIterator[AIMessageChunk],
     accumulator: StreamAccumulator | None = None,
 ) -> AsyncIterator[StreamEvent]:
-    """Map chunks to domain events. Upstream supplies reasoning_content and full tool_calls."""
+    """Map chunks to domain events. Upstream supplies reasoning_content and
+    full tool_calls."""
     accumulated: AIMessageChunk | None = None
 
     async for chunk in chunks:

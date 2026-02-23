@@ -68,9 +68,7 @@ class GatedChatModel(BaseChatModel):
     # Token-budget message trimming
     # ------------------------------------------------------------------
 
-    def _trim_messages(
-        self, messages: list[BaseMessage]
-    ) -> list[BaseMessage]:
+    def _trim_messages(self, messages: list[BaseMessage]) -> list[BaseMessage]:
         """Trim *messages* to fit ``context_window - max_tokens``.
 
         Strategy:
@@ -93,9 +91,7 @@ class GatedChatModel(BaseChatModel):
             else:
                 history_msgs.append(msg)
 
-        fixed_cost = sum(
-            estimate_tokens(m.content or "") for m in system_msgs
-        )
+        fixed_cost = sum(estimate_tokens(m.content or "") for m in system_msgs)
         if last_msg is not None:
             fixed_cost += estimate_tokens(last_msg.content or "")
 
@@ -135,9 +131,7 @@ class GatedChatModel(BaseChatModel):
 
         result = system_msgs + kept + ([last_msg] if last_msg else [])
 
-        total_tokens = sum(
-            estimate_tokens(m.content or "") for m in result
-        )
+        total_tokens = sum(estimate_tokens(m.content or "") for m in result)
         LLM_INPUT_TOKENS.labels(model_name=self.model_name).observe(total_tokens)
 
         return result

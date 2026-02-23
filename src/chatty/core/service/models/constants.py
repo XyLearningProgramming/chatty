@@ -32,4 +32,3 @@ VALID_TOOL_STATUSES = frozenset(
         TOOL_STATUS_ERROR,
     }
 )
-

@@ -68,9 +68,7 @@ class QwenNoThinkChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        return self.inner._generate(
-            self._inject(messages), stop, run_manager, **kwargs
-        )
+        return self.inner._generate(self._inject(messages), stop, run_manager, **kwargs)
 
     async def _agenerate(
         self,

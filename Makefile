@@ -43,7 +43,8 @@ test-golden:
 lint:
 	uv run ruff check src/
 
-format:
+format: ## Run ruff linter (--fix) and formatter
+	uv run ruff check src/ --fix
 	uv run ruff format src/
 
 typecheck:
@@ -56,7 +57,7 @@ dev:
 	uv run --env-file $(ROOT).env uvicorn chatty.app:app --host 0.0.0.0 --port 8080 --reload
 
 cli:
-	cd $(ROOT) && uv run --env-file $(ROOT).env python -m cli
+	cd $(ROOT) && uv run --env-file $(ROOT).env python -m cli --show-thinking
 
 # Database
 db-upgrade:
