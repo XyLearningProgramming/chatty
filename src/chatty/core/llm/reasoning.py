@@ -74,8 +74,8 @@ class ReasoningChatOpenAI(ChatOpenAI):
             delta = choices[0].get(_KEY_DELTA) or {}
             reasoning = delta.get(_KEY_REASONING_CONTENT)
             if reasoning and isinstance(generation_chunk.message, AIMessageChunk):
-                generation_chunk.message.additional_kwargs[
-                    _KEY_REASONING_CONTENT
-                ] = reasoning
+                generation_chunk.message.additional_kwargs[_KEY_REASONING_CONTENT] = (
+                    reasoning
+                )
 
         return generation_chunk

@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import Depends
 from langchain_core.language_models import BaseChatModel
+
 from chatty.configs.config import get_llm_config
 from chatty.configs.system import LLMConfig
 from chatty.infra.concurrency.semaphore import ModelSemaphore, get_model_semaphore
