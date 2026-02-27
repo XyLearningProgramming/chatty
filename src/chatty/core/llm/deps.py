@@ -5,7 +5,6 @@ from typing import Annotated
 
 from fastapi import Depends
 from langchain_core.language_models import BaseChatModel
-from langchain_openai import ChatOpenAI
 
 from chatty.configs.config import get_llm_config
 from chatty.configs.system import LLMConfig
@@ -13,15 +12,16 @@ from chatty.infra.concurrency.semaphore import ModelSemaphore, get_model_semapho
 
 from .gated import GatedChatModel
 from .no_think import QwenNoThinkChatModel
+from .reasoning import ReasoningChatOpenAI
 
 logger = logging.getLogger(__name__)
 
 
 def get_llm(
     config: Annotated[LLMConfig, Depends(get_llm_config)],
-) -> ChatOpenAI:
-    """Create and return a raw ChatOpenAI instance."""
-    return ChatOpenAI(
+) -> ReasoningChatOpenAI:
+    """Create and return a ChatOpenAI instance that preserves reasoning_content."""
+    return ReasoningChatOpenAI(
         base_url=config.endpoint,
         api_key=config.api_key,
         model=config.model_name,
