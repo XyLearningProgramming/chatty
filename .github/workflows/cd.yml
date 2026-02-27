@@ -11,7 +11,7 @@ env:
   IMAGE_REPOSITORY: ${{ secrets.IMAGE_NAME }}
   IMAGE_TAG: ${{ github.sha }}
   NAMESPACE: backend
-  TARGET_NODE: active-nerd-2
+  TARGET_NODE: active-nerd-2.localdomain
 
 jobs:
   deploy:
